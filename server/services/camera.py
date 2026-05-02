@@ -5,18 +5,17 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from typing import Any, AsyncIterator, Callable
-
-import cv2
-import numpy as np
+from typing import Any, AsyncIterator
 
 from ..ros.bridge import RosBridge
 
 logger = logging.getLogger(__name__)
 
+JPEG_PREFIX = b"\xff\xd8\xff"
+
 
 class CameraStream:
-    """Subscribes to a compressed image topic and yields MJPG frames."""
+    """Subscribes to a compressed image topic and yields JPEG frames."""
 
     def __init__(
         self,
@@ -36,7 +35,7 @@ class CameraStream:
             self._topic,
             "sensor_msgs/msg/CompressedImage",
             self._on_frame,
-            throttle_rate=50,
+            throttle_rate=33,
         )
         self._subscribed = True
         logger.info("Camera subscribed to %s", self._topic)
@@ -46,16 +45,27 @@ class CameraStream:
         if not data_b64:
             return
         raw = base64.b64decode(data_b64)
-        nparr = np.frombuffer(raw, dtype=np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        if frame is not None:
-            _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
-            self._latest_frame = jpeg.tobytes()
-            for event in self._subscribers:
-                event.set()
+        # If already JPEG, pass through directly — skip decode/re-encode
+        if raw[:3] == JPEG_PREFIX:
+            self._latest_frame = raw
+        else:
+            # Non-JPEG format (PNG, etc.) — transcode to JPEG via OpenCV
+            import cv2
+            import numpy as np
+
+            nparr = np.frombuffer(raw, dtype=np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            if frame is not None:
+                _, jpeg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                self._latest_frame = jpeg.tobytes()
+            else:
+                return
+
+        for event in self._subscribers:
+            event.set()
 
     async def frames(self) -> AsyncIterator[bytes]:
-        """Yield MJPG frames as they arrive."""
+        """Yield JPEG frames as they arrive."""
         event = asyncio.Event()
         self._subscribers.append(event)
         try:
