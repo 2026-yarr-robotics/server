@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "cup-stack-server"
+version = "0.1.0"
+description = "Web dashboard server for cup_stack ROS 2 robot control"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "roslibpy>=1.3",
+    "opencv-python>=4.8",
+    "numpy>=1.24",
+]
+
+[project.optional-dependencies]
+dev = [
+    "httpx>=0.27",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+cup-server = "server.main:main"
+cup-robot = "server.entrypoints.robot:main"
+cup-handineye = "server.entrypoints.handineye:main"
+cup-handtoeye = "server.entrypoints.handtoeye:main"
+
+[tool.setuptools.packages.find]
+include = ["server*"]

@@ -1,0 +1,55 @@
+services:
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - robot
+      - handineye
+      - handtoeye
+    networks:
+      - cup_stack
+
+  robot:
+    build:
+      context: .
+      target: robot
+    environment:
+      - ROSBRIDGE_HOST=host.docker.internal
+      - ROSBRIDGE_PORT=9090
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ../cup_stack/ros2:/app/ros2:ro
+    networks:
+      - cup_stack
+
+  handineye:
+    build:
+      context: .
+      target: handineye
+    environment:
+      - ROSBRIDGE_HOST=host.docker.internal
+      - ROSBRIDGE_PORT=9090
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cup_stack
+
+  handtoeye:
+    build:
+      context: .
+      target: handtoeye
+    environment:
+      - ROSBRIDGE_HOST=host.docker.internal
+      - ROSBRIDGE_PORT=9090
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cup_stack
+
+networks:
+  cup_stack:
+    driver: bridge
