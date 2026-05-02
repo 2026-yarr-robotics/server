@@ -20,46 +20,41 @@ services:
       context: .
       target: robot
     environment:
-      - ROSBRIDGE_HOST=rosbridge
+      - ROSBRIDGE_HOST=host.docker.internal
       - ROSBRIDGE_PORT=9090
     volumes:
       - ../cup_stack/ros2:/app/ros2:ro
     networks:
       - cup_stack
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   handineye:
     build:
       context: .
       target: handineye
     environment:
-      - ROSBRIDGE_HOST=rosbridge
+      - ROSBRIDGE_HOST=host.docker.internal
       - ROSBRIDGE_PORT=9090
     networks:
       - cup_stack
     restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   handtoeye:
     build:
       context: .
       target: handtoeye
     environment:
-      - ROSBRIDGE_HOST=rosbridge
+      - ROSBRIDGE_HOST=host.docker.internal
       - ROSBRIDGE_PORT=9090
     networks:
       - cup_stack
     restart: unless-stopped
-
-  # ---- ROS 2 rosbridge ----
-  rosbridge:
-    build:
-      context: .
-      target: rosbridge
-    networks:
-      - cup_stack
-    ports:
-      - "9090:9090"
-    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   cloudflared:
     image: cloudflare/cloudflared:latest
