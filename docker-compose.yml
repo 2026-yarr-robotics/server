@@ -1,8 +1,7 @@
 services:
   # ---- Reverse proxy + Frontend serving ----
   nginx:
-    build:
-      context: ../frontend
+    image: nginx:alpine
     ports:
       - "80:80"
     volumes:
@@ -13,6 +12,7 @@ services:
       - handtoeye
     networks:
       - cup_stack
+    restart: unless-stopped
 
   # ---- Backend domain services ----
   robot:
@@ -26,6 +26,7 @@ services:
       - ../cup_stack/ros2:/app/ros2:ro
     networks:
       - cup_stack
+    restart: unless-stopped
 
   handineye:
     build:
@@ -36,6 +37,7 @@ services:
       - ROSBRIDGE_PORT=9090
     networks:
       - cup_stack
+    restart: unless-stopped
 
   handtoeye:
     build:
@@ -46,19 +48,18 @@ services:
       - ROSBRIDGE_PORT=9090
     networks:
       - cup_stack
+    restart: unless-stopped
 
   # ---- ROS 2 rosbridge ----
   rosbridge:
-    image: ros:humble
-    command: >
-      bash -c "source /opt/ros/humble/setup.bash
-      && apt-get update && apt-get install -y ros-humble-rosbridge-suite
-      && source /opt/ros/humble/setup.bash
-      && ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
+    build:
+      context: .
+      target: rosbridge
     networks:
       - cup_stack
     ports:
       - "9090:9090"
+    restart: unless-stopped
 
   cloudflared:
     image: cloudflare/cloudflared:latest

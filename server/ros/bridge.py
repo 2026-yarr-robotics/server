@@ -115,14 +115,22 @@ async def connect_bridge(config: RosBridgeConfig) -> RosBridge:
     loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, bridge.connect)
 
-    for _ in range(20):
-        if bridge.connected:
-            return bridge
-        await asyncio.sleep(0.25)
+    elapsed = 0.0
+    interval = 0.25
+    log_every = 5.0
+    while not bridge.connected:
+        await asyncio.sleep(interval)
+        elapsed += interval
+        if elapsed % log_every < interval:
+            logger.info(
+                "Waiting for rosbridge at %s:%d (%.0fs)...",
+                config.host,
+                config.port,
+                elapsed,
+            )
 
-    raise ConnectionError(
-        f"Failed to connect to rosbridge at {config.host}:{config.port}"
-    )
+    logger.info("Connected to rosbridge at %s:%d", config.host, config.port)
+    return bridge
 
 
 async def disconnect_bridge() -> None:
