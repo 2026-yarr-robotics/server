@@ -10,5 +10,12 @@ fi
 
 source "$ROS_SETUP"
 
+if ! ros2 pkg list 2>/dev/null | grep -q "^rosbridge_server$"; then
+    echo "rosbridge_server not found. Installing..."
+    sudo apt-get update -qq
+    sudo apt-get install -y ros-humble-rosbridge-suite
+    source "$ROS_SETUP"
+fi
+
 echo "Starting rosbridge_server on port 9090..."
 exec ros2 launch rosbridge_server rosbridge_websocket_launch.xml
