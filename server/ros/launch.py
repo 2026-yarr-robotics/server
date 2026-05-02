@@ -21,6 +21,8 @@ TASK_COMMANDS = {
     "cup_unstack",
     "cup_pyramid_select",
     "cup_unstack_select",
+    "cup_pyramid_web",
+    "cup_unstack_web",
 }
 ALL_COMMANDS = BRINGUP_COMMANDS | TASK_COMMANDS
 

@@ -23,9 +23,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+from ..config import RosBridgeConfig as _RBC
+
 settings = AppSettings()
-settings.rosbridge.host = os.getenv("ROSBRIDGE_HOST", settings.rosbridge.host)
-settings.rosbridge.port = int(os.getenv("ROSBRIDGE_PORT", str(settings.rosbridge.port)))
+settings.rosbridge = _RBC(
+    host=os.getenv("ROSBRIDGE_HOST", settings.rosbridge.host),
+    port=int(os.getenv("ROSBRIDGE_PORT", str(settings.rosbridge.port))),
+)
 
 _domain: HandToEyeDomain | None = None
 _camera: CameraStream | None = None
