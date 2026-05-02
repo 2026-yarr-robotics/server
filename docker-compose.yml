@@ -1,6 +1,8 @@
 services:
+  # ---- Reverse proxy + Frontend serving ----
   nginx:
-    image: nginx:1.25-alpine
+    build:
+      context: ../frontend
     ports:
       - "80:80"
     volumes:
@@ -12,15 +14,14 @@ services:
     networks:
       - cup_stack
 
+  # ---- Backend domain services ----
   robot:
     build:
       context: .
       target: robot
     environment:
-      - ROSBRIDGE_HOST=host.docker.internal
+      - ROSBRIDGE_HOST=rosbridge
       - ROSBRIDGE_PORT=9090
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ../cup_stack/ros2:/app/ros2:ro
     networks:
@@ -31,10 +32,8 @@ services:
       context: .
       target: handineye
     environment:
-      - ROSBRIDGE_HOST=host.docker.internal
+      - ROSBRIDGE_HOST=rosbridge
       - ROSBRIDGE_PORT=9090
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks:
       - cup_stack
 
@@ -43,12 +42,23 @@ services:
       context: .
       target: handtoeye
     environment:
-      - ROSBRIDGE_HOST=host.docker.internal
+      - ROSBRIDGE_HOST=rosbridge
       - ROSBRIDGE_PORT=9090
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks:
       - cup_stack
+
+  # ---- ROS 2 rosbridge ----
+  rosbridge:
+    image: ros:humble
+    command: >
+      bash -c "source /opt/ros/humble/setup.bash
+      && apt-get update && apt-get install -y ros-humble-rosbridge-suite
+      && source /opt/ros/humble/setup.bash
+      && ros2 launch rosbridge_server rosbridge_websocket_launch.xml"
+    networks:
+      - cup_stack
+    ports:
+      - "9090:9090"
 
 networks:
   cup_stack:
