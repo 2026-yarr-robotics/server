@@ -1,0 +1,7 @@
+tunnel: 4ffcfc13-173e-468f-8623-cab1fa0813c5
+credentials-file: /etc/cloudflared/4ffcfc13-173e-468f-8623-cab1fa0813c5.json
+
+ingress:
+  - hostname: yarr-api.simplyimg.com
+    service: http://nginx:80
+  - service: http_status:404

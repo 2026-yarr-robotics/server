@@ -60,6 +60,18 @@ services:
     ports:
       - "9090:9090"
 
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ~/.cloudflared/4ffcfc13-173e-468f-8623-cab1fa0813c5.json:/etc/cloudflared/4ffcfc13-173e-468f-8623-cab1fa0813c5.json:ro
+      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+    depends_on:
+      - nginx
+    networks:
+      - cup_stack
+    restart: unless-stopped
+
 networks:
   cup_stack:
     driver: bridge
