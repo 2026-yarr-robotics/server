@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY pyproject.toml ./
 COPY server/ ./server/
 
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir .
 
 
 FROM base AS robot
