@@ -8,7 +8,7 @@
 
 set -e
 
-MODE=${1:-""}
+MODE=${1:-"real"}
 ROBOT_IP=${2:-"192.168.1.100"}
 ROS_SETUP="/opt/ros/humble/setup.bash"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
