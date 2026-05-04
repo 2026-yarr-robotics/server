@@ -7,10 +7,23 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..config import WorkspaceLimits
 from ..ros.bridge import RosBridge
 from ..ros.launch import LaunchManager, TaskStatus
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class MoveLimits:
+    """Current move limits from workspace config."""
+    x_min: float
+    x_max: float
+    y_min: float
+    y_max: float
+    z_min: float
+    z_max: float
+    grid_spacing: float
 
 
 @dataclass
@@ -36,12 +49,34 @@ class RobotDomain:
         bridge: RosBridge,
         launcher: LaunchManager,
         joint_states_topic: str = "/joint_states",
+        workspace_limits: WorkspaceLimits | None = None,
     ) -> None:
         self._bridge = bridge
         self._launcher = launcher
         self._status = RobotStatus()
         self._joint_topic = joint_states_topic
         self._subscribed = False
+        self._move_limits = MoveLimits(
+            x_min=workspace_limits.x_min if workspace_limits else -0.5,
+            x_max=workspace_limits.x_max if workspace_limits else 0.5,
+            y_min=workspace_limits.y_min if workspace_limits else -0.5,
+            y_max=workspace_limits.y_max if workspace_limits else 0.5,
+            z_min=workspace_limits.z_min if workspace_limits else 0.25,
+            z_max=workspace_limits.z_max if workspace_limits else 0.55,
+            grid_spacing=workspace_limits.grid_spacing if workspace_limits else 0.05,
+        )
+
+    @property
+    def move_limits(self) -> dict[str, Any]:
+        return {
+            "x_min": self._move_limits.x_min,
+            "x_max": self._move_limits.x_max,
+            "y_min": self._move_limits.y_min,
+            "y_max": self._move_limits.y_max,
+            "z_min": self._move_limits.z_min,
+            "z_max": self._move_limits.z_max,
+            "grid_spacing": self._move_limits.grid_spacing,
+        }
 
     @property
     def status(self) -> RobotStatus:
@@ -107,3 +142,55 @@ class RobotDomain:
 
     async def get_log(self, name: str, tail: int = 50) -> list[str]:
         return await self._launcher.get_log(name, tail)
+
+    def _clamp_coord(self, value: float, min_val: float, max_val: float) -> float:
+        """Clamp coordinate within limits."""
+        return max(min_val, min(max_val, value))
+
+    def _validate_target(
+        self,
+        x: float,
+        y: float,
+        z: float,
+    ) -> tuple[float, float, float] | None:
+        """Validate and clamp target within workspace limits."""
+        if (x < self._move_limits.x_min or x > self._move_limits.x_max or
+            y < self._move_limits.y_min or y > self._move_limits.y_max or
+            z < self._move_limits.z_min or z > self._move_limits.z_max):
+            logger.warning(
+                "Target out of bounds: (%.3f, %.3f, %.3f), clamping to workspace",
+                x, y, z,
+            )
+        return (
+            self._clamp_coord(x, self._move_limits.x_min, self._move_limits.x_max),
+            self._clamp_coord(y, self._move_limits.y_min, self._move_limits.y_max),
+            self._clamp_coord(z, self._move_limits.z_min, self._move_limits.z_max),
+        )
+
+    async def move_to(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        mode: str = "absolute",
+    ) -> dict[str, Any]:
+        """Move robot end-effector to specified position."""
+        clamped = self._validate_target(x, y, z)
+        if clamped is None:
+            raise ValueError("Invalid target position")
+
+        target_x, target_y, target_z = clamped
+
+        # Call ROS service via rosbridge
+        service_name = "/move_cartesian"
+        result = await self._bridge.call_service(
+            service_name,
+            "cup_stack_interfaces/srv/MoveCartesian",
+            {
+                "x": target_x,
+                "y": target_y,
+                "z": target_z,
+                "mode": mode,
+            },
+        )
+        return result if result else {"success": False, "message": "Service call failed"}

@@ -89,3 +89,33 @@ async def get_task_log(name: str = "", tail: int = 50) -> dict[str, Any]:
         return {"name": name, "log": lines}
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/workspace/limits")
+async def get_workspace_limits() -> dict[str, Any]:
+    """Get workspace safe zone limits."""
+    return _get_domain().move_limits
+
+
+@router.post("/move")
+async def move_robot(body: dict[str, Any]) -> dict[str, Any]:
+    """Move robot end-effector to specified position."""
+    x = body.get("x")
+    y = body.get("y")
+    z = body.get("z")
+    mode = body.get("mode", "absolute")
+
+    if x is None or y is None or z is None:
+        raise HTTPException(status_code=400, detail="Missing required fields: x, y, z")
+
+    if mode not in ("absolute", "relative"):
+        raise HTTPException(status_code=400, detail="mode must be 'absolute' or 'relative'")
+
+    domain = _get_domain()
+    try:
+        result = await domain.move_to(float(x), float(y), float(z), mode)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))

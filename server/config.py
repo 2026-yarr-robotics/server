@@ -64,6 +64,19 @@ class RobotTopics:
 
 
 @dataclass(frozen=True)
+class WorkspaceLimits:
+    """Robot workspace safe zone limits (meters)."""
+
+    x_min: float = -0.5
+    x_max: float = 0.5
+    y_min: float = -0.5
+    y_max: float = 0.5
+    z_min: float = 0.25
+    z_max: float = 0.55
+    grid_spacing: float = 0.05
+
+
+@dataclass(frozen=True)
 class ServicePorts:
     robot: int = 8001
     handineye: int = 8002
@@ -78,3 +91,4 @@ class AppSettings:
     cameras: CameraTopics = field(default_factory=CameraTopics)
     robot: RobotTopics = field(default_factory=RobotTopics)
     ports: ServicePorts = field(default_factory=ServicePorts)
+    workspace_limits: WorkspaceLimits = field(default_factory=WorkspaceLimits)
