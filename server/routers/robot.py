@@ -91,6 +91,15 @@ async def get_task_log(name: str = "", tail: int = 50) -> dict[str, Any]:
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@router.get("/position")
+async def get_ee_position() -> dict[str, Any]:
+    """Return last known end-effector position (last commanded position)."""
+    pos = _get_domain().get_ee_position()
+    if pos is None:
+        raise HTTPException(status_code=404, detail="Position not yet known — issue a move command first")
+    return pos
+
+
 @router.get("/workspace/limits")
 async def get_workspace_limits() -> dict[str, Any]:
     """Get workspace safe zone limits."""

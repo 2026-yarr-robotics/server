@@ -56,6 +56,7 @@ class RobotDomain:
         self._status = RobotStatus()
         self._joint_topic = joint_states_topic
         self._subscribed = False
+        self._commanded_pos: dict[str, float] | None = None
         self._move_limits = MoveLimits(
             x_min=workspace_limits.x_min if workspace_limits else -0.5,
             x_max=workspace_limits.x_max if workspace_limits else 0.5,
@@ -124,6 +125,9 @@ class RobotDomain:
         await self._launcher.stop(name)
         return {"name": name, "status": "stopped"}
 
+    def get_ee_position(self) -> dict[str, float] | None:
+        return self._commanded_pos
+
     def get_status(self) -> dict[str, Any]:
         s = self.status
         return {
@@ -138,6 +142,7 @@ class RobotDomain:
                 "status": s.task_status.value,
             },
             "tasks": self._launcher.list_tasks(),
+            "ee_position": self._commanded_pos,
         }
 
     async def get_log(self, name: str, tail: int = 50) -> list[str]:
@@ -181,6 +186,9 @@ class RobotDomain:
 
         target_x, target_y, target_z = clamped
 
+        # Record commanded position before service call so it's available immediately
+        self._commanded_pos = {"x": target_x, "y": target_y, "z": target_z}
+
         # Call ROS service via rosbridge
         service_name = "/move_cartesian"
         result = await self._bridge.call_service(
@@ -193,4 +201,5 @@ class RobotDomain:
                 "mode": mode,
             },
         )
-        return result if result else {"success": False, "message": "Service call failed"}
+        base = result if result else {"success": False, "message": "Service call failed"}
+        return {**base, "position": self._commanded_pos}
