@@ -53,9 +53,9 @@ class CameraTopics:
     handineye_info: str = "/camera/camera/color/camera_info"
     handineye_color: str = "/camera/camera/color/image_raw/compressed"
     handineye_depth: str = "/camera/camera/aligned_depth_to_color/image_raw"
-    handtoeye_info: str = "/fixed_camera/color/camera_info"
-    handtoeye_color: str = "/fixed_camera/color/image_raw/compressed"
-    handtoeye_depth: str = "/fixed_camera/aligned_depth_to_color/image_raw"
+    handtoeye_info: str = "/camera/fixed_camera/color/camera_info"
+    handtoeye_color: str = "/camera/fixed_camera/color/image_raw/compressed"
+    handtoeye_depth: str = "/camera/fixed_camera/aligned_depth_to_color/image_raw"
 
 
 @dataclass(frozen=True)
