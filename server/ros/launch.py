@@ -305,7 +305,7 @@ class LaunchManager:
 
         task = self._tasks.get(name)
         if task is None:
-            raise KeyError(f"No task named '{name}'")
+            return  # idempotent: already stopped / never started
 
         if self._agent_url and task.process is None:
             await self._stop_task_via_agent(name)
