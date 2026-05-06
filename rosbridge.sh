@@ -2,6 +2,8 @@
 set -e
 
 ROS_SETUP="/opt/ros/humble/setup.bash"
+CUP_STACK_SETUP="/home/ssu/development/cup-stack/install/setup.bash"
+ROS2_CUP_STACK_SETUP="/home/ssu/development/cup-stack/ros2-cup-stack/ros2/install/setup.bash"
 
 if [[ ! -f "$ROS_SETUP" ]]; then
     echo "ERROR: ROS 2 Humble not found at $ROS_SETUP" >&2
@@ -10,11 +12,28 @@ fi
 
 source "$ROS_SETUP"
 
+if [[ -f "$CUP_STACK_SETUP" ]]; then
+    source "$CUP_STACK_SETUP"
+else
+    echo "WARN: cup-stack overlay not found at $CUP_STACK_SETUP" >&2
+fi
+if [[ -f "$ROS2_CUP_STACK_SETUP" ]]; then
+    source "$ROS2_CUP_STACK_SETUP"
+else
+    echo "WARN: ROS 2 cup-stack overlay not found at $ROS2_CUP_STACK_SETUP" >&2
+fi
+
 if ! ros2 pkg list 2>/dev/null | grep -q "^rosbridge_server$"; then
     echo "rosbridge_server not found. Installing..."
     sudo apt-get update -qq
     sudo apt-get install -y ros-humble-rosbridge-suite
     source "$ROS_SETUP"
+    if [[ -f "$CUP_STACK_SETUP" ]]; then
+        source "$CUP_STACK_SETUP"
+    fi
+    if [[ -f "$ROS2_CUP_STACK_SETUP" ]]; then
+        source "$ROS2_CUP_STACK_SETUP"
+    fi
 fi
 
 echo "Starting rosbridge_server on port 9090..."
