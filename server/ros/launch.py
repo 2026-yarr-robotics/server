@@ -19,6 +19,12 @@ logger = logging.getLogger(__name__)
 
 BRINGUP_COMMANDS = {"bringup_sim", "bringup_real"}
 SERVICE_COMMANDS = {"move_cartesian"}  # long-running service nodes, not one-shot tasks
+
+# Substrings that make a log line too noisy to show in the dashboard feed
+_LOG_NOISE = frozenset([
+    "returned 1 controllers in list",
+    "Trajectory execution is managing controllers",
+])
 TASK_COMMANDS = {
     "cup_pyramid",
     "cup_unstack",
@@ -439,7 +445,8 @@ class LaunchManager:
             if not line:
                 break
             decoded = line.decode(errors="replace").rstrip()
-            task.append_log(decoded)
+            if not any(noise in decoded for noise in _LOG_NOISE):
+                task.append_log(decoded)
         if task.status == TaskStatus.RUNNING:
             rc = task.process.returncode
             task.status = TaskStatus.IDLE if rc == 0 else TaskStatus.FAILED
