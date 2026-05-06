@@ -38,6 +38,12 @@ if pgrep -f "rosbridge_websocket" &>/dev/null; then
     pkill -SIGKILL -f "rosbridge_websocket" 2>/dev/null || true
 fi
 
+# ── 3-2. bringup-agent (port 8099) ───────────────────────
+if pgrep -f "bringup_agent.py" &>/dev/null; then
+    echo "[INFO] bringup-agent 종료..."
+    pkill -f "bringup_agent.py" 2>/dev/null || true
+fi
+
 # ── 4. Docker Compose ────────────────────────────────────
 if docker compose -f "$SCRIPT_DIR/docker-compose.yml" ps -q 2>/dev/null | grep -q .; then
     echo "[INFO] Docker 서비스 종료..."
