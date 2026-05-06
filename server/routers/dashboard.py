@@ -82,7 +82,7 @@ async def ws_task_log(ws: WebSocket) -> None:
 
     try:
         while True:
-            active = launch_manager.active_task
+            active = launch_manager.active_action_task
             if active is not None:
                 logs = active.log_lines[-5:]
                 await ws.send_json({

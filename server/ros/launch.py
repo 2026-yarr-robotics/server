@@ -18,6 +18,7 @@ from ..config import WorkspaceConfig
 logger = logging.getLogger(__name__)
 
 BRINGUP_COMMANDS = {"bringup_sim", "bringup_real"}
+SERVICE_COMMANDS = {"move_cartesian"}  # long-running service nodes, not one-shot tasks
 TASK_COMMANDS = {
     "cup_pyramid",
     "cup_unstack",
@@ -25,9 +26,8 @@ TASK_COMMANDS = {
     "cup_unstack_select",
     "cup_pyramid_web",
     "cup_unstack_web",
-    "move_cartesian",
 }
-ALL_COMMANDS = BRINGUP_COMMANDS | TASK_COMMANDS
+ALL_COMMANDS = BRINGUP_COMMANDS | TASK_COMMANDS | SERVICE_COMMANDS
 
 
 class TaskStatus(str, Enum):
@@ -81,7 +81,7 @@ class LaunchManager:
     @property
     def active_action_task(self) -> RunningTask | None:
         for task in self._tasks.values():
-            if task.status == TaskStatus.RUNNING:
+            if task.status == TaskStatus.RUNNING and task.command not in SERVICE_COMMANDS:
                 return task
         return None
 
