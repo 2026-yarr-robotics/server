@@ -102,7 +102,7 @@ def create_app() -> FastAPI:
             return
         try:
             while True:
-                active = _launcher.active_task
+                active = _launcher.active_action_task
                 if active is not None:
                     await ws.send_json({
                         "task": active.name,
