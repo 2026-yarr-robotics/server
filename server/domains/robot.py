@@ -209,20 +209,14 @@ class RobotDomain:
 
         target_x, target_y, target_z = clamped
 
-        # Record commanded position before service call so it's available immediately
-        self._commanded_pos = {"x": target_x, "y": target_y, "z": target_z}
-
-        # Call ROS service via rosbridge
-        service_name = "/move_cartesian"
         result = await self._bridge.call_service(
-            service_name,
+            "/move_cartesian",
             "cup_stack_interfaces/srv/MoveCartesian",
-            {
-                "x": target_x,
-                "y": target_y,
-                "z": target_z,
-                "mode": mode,
-            },
+            {"x": target_x, "y": target_y, "z": target_z, "mode": mode},
         )
         base = result if result else {"success": False, "message": "Service call failed"}
+
+        if base.get("success"):
+            self._commanded_pos = {"x": target_x, "y": target_y, "z": target_z}
+
         return {**base, "position": self._commanded_pos}
