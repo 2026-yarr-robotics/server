@@ -42,7 +42,10 @@ def create_app() -> FastAPI:
         global _domain, _launcher
 
         bridge = await connect_bridge(settings.rosbridge)
-        _launcher = LaunchManager(settings.workspace)
+        _launcher = LaunchManager(
+            settings.workspace,
+            agent_url=os.getenv("BRINGUP_AGENT_URL"),
+        )
         _domain = RobotDomain(
             bridge,
             _launcher,

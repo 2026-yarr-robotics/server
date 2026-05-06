@@ -22,6 +22,7 @@ services:
     environment:
       - ROSBRIDGE_HOST=host.docker.internal
       - ROSBRIDGE_PORT=9090
+      - BRINGUP_AGENT_URL=http://host.docker.internal:8099
     volumes:
       - ../cup_stack/ros2:/app/ros2:ro
     networks:

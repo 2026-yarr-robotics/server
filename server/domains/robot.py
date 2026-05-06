@@ -9,7 +9,7 @@ from typing import Any
 
 from ..config import WorkspaceLimits
 from ..ros.bridge import RosBridge
-from ..ros.launch import LaunchManager, TaskStatus
+from ..ros.launch import BRINGUP_COMMANDS, LaunchManager, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ class RobotDomain:
 
     @property
     def status(self) -> RobotStatus:
-        active = self._launcher.active_task
+        active = self._launcher.active_action_task
         if active is not None:
             self._status.task_name = active.name
             self._status.task_status = active.status
@@ -118,7 +118,7 @@ class RobotDomain:
         return {
             "name": task.name,
             "status": task.status.value,
-            "pid": task.process.pid,
+            "pid": task.process.pid if task.process else None,
         }
 
     async def stop_task(self, name: str) -> dict[str, Any]:
@@ -130,6 +130,7 @@ class RobotDomain:
 
     def get_status(self) -> dict[str, Any]:
         s = self.status
+        bringup = self._launcher.bringup_task
         return {
             "joints": {
                 "name": s.joints.name,
@@ -140,6 +141,10 @@ class RobotDomain:
             "task": {
                 "name": s.task_name,
                 "status": s.task_status.value,
+            },
+            "bringup": {
+                "name": bringup.name if bringup else None,
+                "status": bringup.status.value if bringup else "idle",
             },
             "tasks": self._launcher.list_tasks(),
             "ee_position": self._commanded_pos,
