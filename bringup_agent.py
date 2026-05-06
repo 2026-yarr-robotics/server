@@ -32,8 +32,9 @@ logger = logging.getLogger(__name__)
 PORT = 8099
 _SCRIPT_DIR = Path(__file__).resolve().parent
 CUP_STACK_DIR = _SCRIPT_DIR.parent / "ros2-cup-stack" / "ros2" / "src" / "cup_stack"
+ROS2_WORKSPACE = CUP_STACK_DIR.parent.parent  # ros2-cup-stack/ros2/
 
-# ── Shared state (protected by _lock) ─────────────────────────────────────────
+# ── Bringup state (protected by _lock) ────────────────────────────────────────
 _lock = threading.Lock()
 _proc: subprocess.Popen[bytes] | None = None
 _log_lines: list[str] = []
@@ -56,19 +57,69 @@ def _read_output(proc: subprocess.Popen[bytes]) -> None:
     logger.info("bringup process exited (rc=%s)", proc.returncode)
 
 
+# ── Task state (per-command processes) ────────────────────────────────────────
+_tasks_lock = threading.Lock()
+_task_procs: dict[str, subprocess.Popen[bytes]] = {}
+_task_logs: dict[str, list[str]] = {}
+_task_statuses: dict[str, str] = {}  # idle | running | failed
+
+
+def _build_task_cmd(command: str, args: dict[str, str]) -> list[str]:
+    install_setup = ROS2_WORKSPACE / "install" / "setup.bash"
+    doosan_setup = Path("/home/ssu/ros2_ws/install/setup.bash")
+    ros_setup = "/opt/ros/humble/setup.bash"
+    launch_args = " ".join(f"{k}:={v}" for k, v in args.items())
+    ros_cmd = f"ros2 launch cup_stack {command}.launch.py {launch_args}".strip()
+    full = f"source {ros_setup}"
+    if doosan_setup.exists():
+        full += f" && source {doosan_setup}"
+    if install_setup.exists():
+        full += f" && source {install_setup}"
+    full += f" && {ros_cmd}"
+    return ["bash", "-c", full]
+
+
+def _read_task_output(command: str, proc: subprocess.Popen[bytes]) -> None:
+    assert proc.stdout is not None
+    for raw in proc.stdout:
+        line = raw.decode(errors="replace").rstrip()
+        with _tasks_lock:
+            if command in _task_logs:
+                _task_logs[command].append(line)
+                if len(_task_logs[command]) > 500:
+                    del _task_logs[command][:-500]
+    with _tasks_lock:
+        rc = proc.poll()
+        if _task_statuses.get(command) == "running":
+            _task_statuses[command] = "idle" if rc == 0 else "failed"
+    logger.info("task '%s' exited (rc=%s)", command, proc.returncode)
+
+
 # ── HTTP handler ───────────────────────────────────────────────────────────────
 
 class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        if self.path == "/health":
+        path, _, qs = self.path.partition("?")
+        params = dict(p.split("=", 1) for p in qs.split("&") if "=" in p)
+
+        if path == "/health":
             self._json({"ok": True})
-        elif self.path == "/status":
+        elif path == "/status":
             with _lock:
                 data: dict[str, Any] = {
                     "status": _status,
                     "log": list(_log_lines[-50:]),
                 }
             self._json(data)
+        elif path == "/task/status":
+            name = params.get("name", "")
+            if not name:
+                self._json({"error": "missing name"}, 400)
+                return
+            with _tasks_lock:
+                status = _task_statuses.get(name, "idle")
+                log = list(_task_logs.get(name, [])[-50:])
+            self._json({"status": status, "log": log})
         else:
             self._json({"error": "not found"}, 404)
 
@@ -78,7 +129,59 @@ class _Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", 0))
         body: dict[str, Any] = json.loads(self.rfile.read(length) or b"{}")
 
-        if self.path == "/start":
+        if self.path == "/task/start":
+            command = body.get("command", "").strip()
+            args: dict[str, str] = body.get("args", {})
+            if not command:
+                self._json({"error": "missing command"}, 400)
+                return
+
+            with _tasks_lock:
+                existing = _task_procs.get(command)
+                if existing is not None and existing.poll() is None:
+                    self._json({"error": f"task '{command}' already running"}, 409)
+                    return
+
+                cmd = _build_task_cmd(command, args)
+                _task_logs[command] = []
+                _task_statuses[command] = "running"
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    preexec_fn=os.setsid,
+                )
+                _task_procs[command] = proc
+
+            t = threading.Thread(target=_read_task_output, args=(command, proc), daemon=True)
+            t.start()
+            logger.info("task '%s' started (pid=%d)", command, proc.pid)
+            self._json({"status": "started", "pid": proc.pid})
+
+        elif self.path == "/task/stop":
+            command = body.get("command", "").strip()
+            if not command:
+                self._json({"error": "missing command"}, 400)
+                return
+
+            with _tasks_lock:
+                proc = _task_procs.get(command)
+
+            if proc is not None and proc.poll() is None:
+                try:
+                    os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+                except ProcessLookupError:
+                    pass
+                with _tasks_lock:
+                    _task_statuses[command] = "idle"
+                logger.info("SIGINT sent to task '%s' (pid=%d)", command, proc.pid)
+                self._json({"status": "stopped"})
+            else:
+                with _tasks_lock:
+                    _task_statuses[command] = "idle"
+                self._json({"status": "not running"})
+
+        elif self.path == "/start":
             with _lock:
                 if _proc is not None and _proc.poll() is None:
                     self._json({"error": "already running", "status": _status}, 409)

@@ -115,6 +115,9 @@ class LaunchManager:
             raise RuntimeError(
                 f"Task '{active.name}' is already running. Stop it first."
             )
+
+        if self._agent_url:
+            return await self._start_task_via_agent(command, args)
         return await self._start_local(command, args)
 
     async def _start_bringup(self, command: str, args: dict[str, Any]) -> RunningTask:
@@ -159,6 +162,86 @@ class LaunchManager:
             self._poll_agent(task)
         )
         return task
+
+    async def _start_task_via_agent(
+        self, command: str, args: dict[str, Any]
+    ) -> RunningTask:
+        url = f"{self._agent_url}/task/start"
+        payload = {"command": command, "args": args}
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        loop = asyncio.get_running_loop()
+
+        def _call() -> dict[str, Any]:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read())
+
+        resp = await loop.run_in_executor(None, _call)
+        logger.info("task agent response for '%s': %s", command, resp)
+
+        task = RunningTask(
+            name=command,
+            command=command,
+            args=args,
+            process=None,
+            status=TaskStatus.RUNNING,
+        )
+        self._tasks[command] = task
+        self._log_futures[command] = asyncio.create_task(
+            self._poll_task_agent(task)
+        )
+        return task
+
+    async def _poll_task_agent(self, task: RunningTask) -> None:
+        url = f"{self._agent_url}/task/status?name={task.name}"
+        loop = asyncio.get_running_loop()
+
+        def _fetch() -> dict[str, Any]:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                return json.loads(resp.read())
+
+        while True:
+            await asyncio.sleep(1.0)
+            try:
+                data = await loop.run_in_executor(None, _fetch)
+                task.log_lines = data.get("log", [])
+                agent_st = data.get("status", "idle")
+                if agent_st == "running":
+                    task.status = TaskStatus.RUNNING
+                elif agent_st == "failed":
+                    task.status = TaskStatus.FAILED
+                    break
+                elif agent_st == "idle" and task.status == TaskStatus.RUNNING:
+                    task.status = TaskStatus.IDLE
+                    break
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.warning("Task agent poll error for '%s': %s", task.name, exc)
+
+    async def _stop_task_via_agent(self, command: str) -> None:
+        url = f"{self._agent_url}/task/stop"
+        payload = {"command": command}
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        loop = asyncio.get_running_loop()
+
+        def _call() -> dict[str, Any]:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read())
+
+        try:
+            await loop.run_in_executor(None, _call)
+        except Exception as exc:
+            logger.warning("Task agent stop error for '%s': %s", command, exc)
 
     async def _start_local(
         self,
@@ -213,7 +296,15 @@ class LaunchManager:
         task = self._tasks.get(name)
         if task is None:
             raise KeyError(f"No task named '{name}'")
-        await self._stop_local(task)
+
+        if self._agent_url and task.process is None:
+            await self._stop_task_via_agent(name)
+            task.status = TaskStatus.IDLE
+            fut = self._log_futures.pop(name, None)
+            if fut:
+                fut.cancel()
+        else:
+            await self._stop_local(task)
         logger.info("Stopped task '%s'", name)
 
     async def _stop_bringup(self, name: str) -> None:

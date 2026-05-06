@@ -105,10 +105,23 @@ class RosBridge:
         service_name: str,
         service_type: str,
         args: dict[str, Any] | None = None,
+        timeout: float = 10.0,
     ) -> Any:
         service = roslibpy.Service(self.ros, service_name, service_type)
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, lambda: service.call(args or {}))
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, lambda: service.call(args or {})),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError(
+                f"Service call to {service_name} timed out after {timeout}s"
+            )
+        except RuntimeError:
+            raise
+        except Exception as e:
+            raise RuntimeError(str(e)) from e
 
 
 async def connect_bridge(config: RosBridgeConfig) -> RosBridge:
