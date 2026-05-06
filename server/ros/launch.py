@@ -24,6 +24,7 @@ SERVICE_COMMANDS = {"move_cartesian"}  # long-running service nodes, not one-sho
 _LOG_NOISE = frozenset([
     "returned 1 controllers in list",
     "Trajectory execution is managing controllers",
+    "services ready",
 ])
 TASK_COMMANDS = {
     "cup_pyramid",
@@ -214,7 +215,10 @@ class LaunchManager:
             await asyncio.sleep(1.0)
             try:
                 data = await loop.run_in_executor(None, _fetch)
-                task.log_lines = data.get("log", [])
+                task.log_lines = [
+                    l for l in data.get("log", [])
+                    if not any(n in l for n in _LOG_NOISE)
+                ]
                 agent_st = data.get("status", "idle")
                 if agent_st == "running":
                     task.status = TaskStatus.RUNNING
@@ -464,7 +468,10 @@ class LaunchManager:
             await asyncio.sleep(1.0)
             try:
                 data = await loop.run_in_executor(None, _fetch)
-                task.log_lines = data.get("log", [])
+                task.log_lines = [
+                    l for l in data.get("log", [])
+                    if not any(n in l for n in _LOG_NOISE)
+                ]
                 agent_st = data.get("status", "idle")
                 if agent_st == "running":
                     task.status = TaskStatus.RUNNING
