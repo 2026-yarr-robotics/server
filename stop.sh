@@ -14,6 +14,14 @@ if pgrep -f "dsr_bringup2" &>/dev/null; then
     pkill -SIGKILL -f "dsr_bringup2" 2>/dev/null || true
 fi
 
+# ── 1-2. cup_stack tasks (move_cartesian, etc.) ─────────
+if pgrep -f "cup_stack" &>/dev/null; then
+    echo "[INFO] cup_stack 관련 프로세스 종료..."
+    pkill -SIGINT -f "cup_stack" 2>/dev/null || true
+    sleep 1
+    pkill -SIGKILL -f "cup_stack" 2>/dev/null || true
+fi
+
 # ── 2. RealSense 카메라 ──────────────────────────────────
 if pgrep -f "realsense2_camera" &>/dev/null; then
     echo "[INFO] RealSense 카메라 종료..."
