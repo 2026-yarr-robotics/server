@@ -25,6 +25,7 @@ TASK_COMMANDS = {
     "cup_unstack_select",
     "cup_pyramid_web",
     "cup_unstack_web",
+    "move_cartesian",
 }
 ALL_COMMANDS = BRINGUP_COMMANDS | TASK_COMMANDS
 

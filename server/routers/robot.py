@@ -106,6 +106,19 @@ async def get_workspace_limits() -> dict[str, Any]:
     return _get_domain().move_limits
 
 
+@router.post("/gripper")
+async def gripper_control(body: dict[str, Any]) -> dict[str, Any]:
+    """Open or close the gripper. body: {command: 'open' | 'close'}"""
+    command = body.get("command", "").strip().lower()
+    if command not in ("open", "close"):
+        raise HTTPException(status_code=400, detail="command must be 'open' or 'close'")
+    domain = _get_domain()
+    try:
+        return await domain.gripper_control(command)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
 @router.post("/move")
 async def move_robot(body: dict[str, Any]) -> dict[str, Any]:
     """Move robot end-effector to specified position."""

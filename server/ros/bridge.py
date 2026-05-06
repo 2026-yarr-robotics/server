@@ -100,14 +100,15 @@ class RosBridge:
         if sub is not None:
             sub.unsubscribe()
 
-    def call_service(
+    async def call_service(
         self,
         service_name: str,
         service_type: str,
         args: dict[str, Any] | None = None,
     ) -> Any:
         service = roslibpy.Service(self.ros, service_name, service_type)
-        return service.call(args or {})
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, lambda: service.call(args or {}))
 
 
 async def connect_bridge(config: RosBridgeConfig) -> RosBridge:
