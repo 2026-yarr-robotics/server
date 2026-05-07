@@ -1,0 +1,559 @@
+openapi: 3.0.3
+
+info:
+  title: Cup Stack Server API
+  version: 1.0.0
+  description: |
+    Doosan M0609 컵 스태킹 로봇 제어 서버의 REST API.
+
+    서비스별 포트:
+    - **robot**: 8001
+    - **handineye**: 8002
+    - **handtoeye**: 8003
+
+servers:
+  - url: http://localhost:8001
+    description: Robot service
+  - url: http://localhost:8002
+    description: Hand-in-eye calibration service
+  - url: http://localhost:8003
+    description: Hand-to-eye calibration service
+
+tags:
+  - name: robot
+    description: 로봇 상태 조회 및 태스크 제어
+  - name: handineye
+    description: EE 장착 카메라(hand-in-eye) 캘리브레이션
+  - name: handtoeye
+    description: 고정 카메라(hand-to-eye) 캘리브레이션
+
+paths:
+
+  # ── Robot ──────────────────────────────────────────────────────────────────
+
+  /api/robot/status:
+    get:
+      tags: [robot]
+      summary: 로봇 상태 조회
+      description: 현재 관절 상태, 활성 태스크, 전체 태스크 목록을 반환한다.
+      responses:
+        "200":
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RobotStatusResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/bringup:
+    post:
+      tags: [robot]
+      summary: 로봇 bringup 시작
+      description: |
+        `mode=sim`이면 시뮬레이션 bringup 스크립트를 실행하고,
+        `mode=real`이면 실로봇 bringup 스크립트를 `ip` 인자와 함께 실행한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BringupRequest"
+            examples:
+              sim:
+                summary: 시뮬레이션
+                value: { mode: sim }
+              real:
+                summary: 실로봇
+                value: { mode: real, ip: "192.168.1.100" }
+      responses:
+        "200":
+          description: bringup 프로세스 시작됨
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStartedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/task/start:
+    post:
+      tags: [robot]
+      summary: 태스크 시작
+      description: |
+        지정한 ROS 2 launch 태스크를 시작한다.
+        이미 실행 중인 태스크가 있으면 409를 반환한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskStartRequest"
+            examples:
+              pyramid:
+                summary: cup_pyramid (HOME XY 기준)
+                value: { task: cup_pyramid, args: { nest_inc: "0.0127" } }
+              pyramid_web:
+                summary: cup_pyramid_web (픽셀 좌표 지정)
+                value: { task: cup_pyramid_web, args: { pixel_x: "320", pixel_y: "240" } }
+              unstack_web:
+                summary: cup_unstack_web (픽셀 좌표 지정)
+                value: { task: cup_unstack_web, args: { pixel_x: "160", pixel_y: "120" } }
+      responses:
+        "200":
+          description: 태스크 시작됨
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStartedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/task/stop:
+    post:
+      tags: [robot]
+      summary: 태스크 중지
+      description: 실행 중인 태스크에 SIGINT를 보내고 최대 10초 후 SIGKILL로 강제 종료한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TaskStopRequest"
+            example:
+              name: cup_pyramid_web
+      responses:
+        "200":
+          description: 태스크 중지됨
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskStoppedResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/task/log:
+    get:
+      tags: [robot]
+      summary: 태스크 로그 조회
+      description: 지정한 태스크의 최근 stdout 라인을 반환한다.
+      parameters:
+        - name: name
+          in: query
+          required: true
+          description: 태스크 이름
+          schema:
+            type: string
+            example: cup_pyramid_web
+        - name: tail
+          in: query
+          required: false
+          description: 반환할 최대 줄 수
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 500
+      responses:
+        "200":
+          description: 로그 반환
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TaskLogResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Hand-in-Eye ─────────────────────────────────────────────────────────────
+
+  /api/handineye/calibration:
+    get:
+      tags: [handineye]
+      summary: hand-in-eye 캘리브레이션 조회
+      description: 저장된 `T_gripper2camera` 4×4 동차 변환 행렬을 반환한다.
+      responses:
+        "200":
+          description: 캘리브레이션 행렬
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalibrationResponse"
+              example:
+                file: T_gripper2camera.npy
+                matrix:
+                  - [1.0, 0.0, 0.0,   0.0]
+                  - [0.0, 1.0, 0.0,   0.0]
+                  - [0.0, 0.0, 1.0, 150.0]
+                  - [0.0, 0.0, 0.0,   1.0]
+                shape: [4, 4]
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    put:
+      tags: [handineye]
+      summary: hand-in-eye 캘리브레이션 갱신
+      description: |
+        새 `T_gripper2camera` 행렬을 `.npy` 파일로 저장한다.
+        행렬은 mm 단위의 4×4 동차 변환이어야 한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CalibrationUpdateRequest"
+      responses:
+        "200":
+          description: 저장 후 현재 값 반환
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalibrationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  # ── Hand-to-Eye ─────────────────────────────────────────────────────────────
+
+  /api/handtoeye/calibration:
+    get:
+      tags: [handtoeye]
+      summary: hand-to-eye 캘리브레이션 조회
+      description: 저장된 `T_base2camera` 4×4 동차 변환 행렬을 반환한다.
+      responses:
+        "200":
+          description: 캘리브레이션 행렬
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalibrationResponse"
+              example:
+                file: T_base2camera.npy
+                matrix:
+                  - [1.0, 0.0, 0.0,   0.0]
+                  - [0.0, 1.0, 0.0,   0.0]
+                  - [0.0, 0.0, 1.0, 800.0]
+                  - [0.0, 0.0, 0.0,   1.0]
+                shape: [4, 4]
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    put:
+      tags: [handtoeye]
+      summary: hand-to-eye 캘리브레이션 갱신
+      description: |
+        새 `T_base2camera` 행렬을 `.npy` 파일로 저장한다.
+        행렬은 mm 단위의 4×4 동차 변환이어야 한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CalibrationUpdateRequest"
+      responses:
+        "200":
+          description: 저장 후 현재 값 반환
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CalibrationResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+# ── Components ──────────────────────────────────────────────────────────────
+
+components:
+
+  schemas:
+
+    # ── Shared ──
+
+    TaskStatus:
+      type: string
+      enum: [idle, running, stopping, failed]
+      description: 태스크 프로세스 상태
+
+    # ── Robot ──
+
+    JointState:
+      type: object
+      properties:
+        name:
+          type: array
+          items:
+            type: string
+          example: [joint_1, joint_2, joint_3, joint_4, joint_5, joint_6]
+        position:
+          type: array
+          items:
+            type: number
+            format: double
+          description: 라디안
+          example: [0.0, 0.0, 1.5708, 0.0, 1.5708, 1.5708]
+        velocity:
+          type: array
+          items:
+            type: number
+            format: double
+          description: 라디안/s
+          example: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        effort:
+          type: array
+          items:
+            type: number
+            format: double
+          description: N·m
+          example: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    TaskSummary:
+      type: object
+      properties:
+        name:
+          type: string
+          example: bringup_real
+        command:
+          type: string
+          example: bringup_real
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        pid:
+          type: integer
+          nullable: true
+          description: 프로세스 종료 시 null
+          example: 12345
+
+    ActiveTask:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+          example: cup_pyramid_web
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+
+    RobotStatusResponse:
+      type: object
+      required: [joints, task, tasks]
+      properties:
+        joints:
+          $ref: "#/components/schemas/JointState"
+        task:
+          $ref: "#/components/schemas/ActiveTask"
+        tasks:
+          type: array
+          items:
+            $ref: "#/components/schemas/TaskSummary"
+
+    BringupRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [sim, real]
+          default: sim
+          description: "`real`이면 `ip` 필드 필요"
+        ip:
+          type: string
+          default: "192.168.1.100"
+          description: "`mode=real`일 때만 사용. 로봇 컨트롤러 IP"
+          example: "192.168.1.100"
+
+    TaskStartRequest:
+      type: object
+      required: [task]
+      properties:
+        task:
+          type: string
+          enum:
+            - cup_pyramid
+            - cup_unstack
+            - cup_pyramid_select
+            - cup_unstack_select
+            - cup_pyramid_web
+            - cup_unstack_web
+            - bringup_sim
+            - bringup_real
+          description: |
+            실행할 태스크 이름.
+
+            | 값 | 설명 |
+            |---|---|
+            | `cup_pyramid` | HOME XY 기준 피라미드 빌드 |
+            | `cup_unstack` | HOME XY 기준 언스택 |
+            | `cup_pyramid_select` | OpenCV 클릭으로 위치 선택 후 피라미드 빌드 |
+            | `cup_unstack_select` | OpenCV 클릭으로 위치 선택 후 언스택 |
+            | `cup_pyramid_web` | 픽셀 좌표(`pixel_x`, `pixel_y`) 기반 피라미드 빌드 |
+            | `cup_unstack_web` | 픽셀 좌표(`pixel_x`, `pixel_y`) 기반 언스택 |
+          example: cup_pyramid_web
+        args:
+          type: object
+          additionalProperties:
+            type: string
+          description: |
+            launch 파일에 전달할 추가 인자. `key:=value` 형식으로 변환된다.
+
+            `cup_pyramid_web` / `cup_unstack_web` 필수 키:
+            - `pixel_x`: 카메라 픽셀 X (정수 문자열)
+            - `pixel_y`: 카메라 픽셀 Y (정수 문자열)
+
+            모든 태스크 공통 선택 키:
+            - `nest_inc`: nested cup 높이 증가량(m), 기본값 `"0.0127"`
+          example:
+            pixel_x: "320"
+            pixel_y: "240"
+
+    TaskStopRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+          description: 중지할 태스크 이름
+          example: cup_pyramid_web
+
+    TaskStartedResponse:
+      type: object
+      required: [name, status, pid]
+      properties:
+        name:
+          type: string
+          example: cup_pyramid_web
+        status:
+          $ref: "#/components/schemas/TaskStatus"
+        pid:
+          type: integer
+          example: 12346
+
+    TaskStoppedResponse:
+      type: object
+      required: [name, status]
+      properties:
+        name:
+          type: string
+          example: cup_pyramid_web
+        status:
+          type: string
+          example: stopped
+
+    TaskLogResponse:
+      type: object
+      required: [name, log]
+      properties:
+        name:
+          type: string
+          example: cup_pyramid_web
+        log:
+          type: array
+          items:
+            type: string
+          example:
+            - "[INFO] Moving HOME"
+            - "[INFO] CYCLE 1/6 pick(stack=6, z=0.386)"
+            - "[INFO] GRIP"
+
+    # ── Calibration ──
+
+    Matrix4x4:
+      type: array
+      description: 4×4 동차 변환 행렬 (row-major, mm 단위)
+      items:
+        type: array
+        items:
+          type: number
+          format: double
+        minItems: 4
+        maxItems: 4
+      minItems: 4
+      maxItems: 4
+      example:
+        - [1.0, 0.0, 0.0,   0.0]
+        - [0.0, 1.0, 0.0,   0.0]
+        - [0.0, 0.0, 1.0, 150.0]
+        - [0.0, 0.0, 0.0,   1.0]
+
+    CalibrationResponse:
+      type: object
+      required: [file, matrix, shape]
+      properties:
+        file:
+          type: string
+          description: 저장 파일명
+          example: T_gripper2camera.npy
+        matrix:
+          $ref: "#/components/schemas/Matrix4x4"
+        shape:
+          type: array
+          items:
+            type: integer
+          example: [4, 4]
+
+    CalibrationUpdateRequest:
+      type: object
+      required: [matrix]
+      properties:
+        matrix:
+          $ref: "#/components/schemas/Matrix4x4"
+
+    # ── Error ──
+
+    ErrorDetail:
+      type: object
+      properties:
+        detail:
+          type: string
+          description: 에러 설명
+          example: "Invalid task. Choose from: ['bringup_real', 'cup_pyramid', ...]"
+
+  responses:
+
+    BadRequest:
+      description: 잘못된 요청 파라미터
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+
+    NotFound:
+      description: 리소스를 찾을 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+          example:
+            detail: "No task named 'cup_pyramid_web'"
+
+    Conflict:
+      description: 이미 실행 중인 태스크가 있어 새 태스크를 시작할 수 없음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+          example:
+            detail: "Task 'bringup_real' is already running. Stop it first."
+
+    ServiceUnavailable:
+      description: 도메인이 초기화되지 않음
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorDetail"
+          example:
+            detail: "Robot domain not initialized"
