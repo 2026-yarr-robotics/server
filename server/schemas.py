@@ -107,6 +107,41 @@ class MoveResponse(BaseModel):
     position: Optional[EEPositionSchema] = None
 
 
+# ── Cup Detection ─────────────────────────────────────────────────────────────
+
+class PixelPoint(BaseModel):
+    x: float = Field(..., description="픽셀 X")
+    y: float = Field(..., description="픽셀 Y")
+
+
+class BoundingBox(BaseModel):
+    x_min: float
+    y_min: float
+    x_max: float
+    y_max: float
+
+
+class CupInfo(BaseModel):
+    id: str = Field(..., description="프레임 내 고유 ID")
+    label: str = Field(..., description="YOLO 클래스 레이블")
+    confidence: float = Field(..., description="신뢰도 [0.0, 1.0]")
+    position: Optional[EEPositionSchema] = Field(None, description="base_link 3D 좌표 (m); depth 실패 시 null")
+    pixel: PixelPoint = Field(..., description="bbox 중심 픽셀 좌표")
+    bbox: BoundingBox = Field(..., description="픽셀 단위 bbox")
+
+
+class CupDetectionFrame(BaseModel):
+    stamp: float = Field(..., description="UNIX 타임스탬프 (초)")
+    frame_id: str = Field(..., description="좌표 기준 프레임")
+    count: int = Field(..., description="감지된 컵 수")
+    cups: list[CupInfo] = Field(default=[], description="감지된 컵 목록")
+
+
+class CupTriggerRequest(BaseModel):
+    cup_id: str = Field(..., description="감지 결과의 cups[].id 값")
+    task: str = Field(..., description="cup_pyramid_web 또는 cup_unstack_web")
+
+
 # ── Calibration ───────────────────────────────────────────────────────────────
 
 class CalibrationResponse(BaseModel):

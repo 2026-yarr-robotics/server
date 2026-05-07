@@ -11,10 +11,11 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from ..config import AppSettings
+from ..domains.cup_detection import CupDetectionDomain
 from ..domains.robot import RobotDomain
 from ..ros.bridge import RosBridge, connect_bridge, disconnect_bridge
 from ..ros.launch import LaunchManager
-from ..routers.robot import router as robot_router, set_robot_domain
+from ..routers.robot import router as robot_router, set_cup_detection_domain, set_robot_domain
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,6 +33,7 @@ settings.rosbridge = _RBC(
 
 _domain: RobotDomain | None = None
 _launcher: LaunchManager | None = None
+_cup_domain: CupDetectionDomain | None = None
 
 
 def create_app() -> FastAPI:
@@ -39,7 +41,7 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        global _domain, _launcher
+        global _domain, _launcher, _cup_domain
 
         bridge = await connect_bridge(settings.rosbridge)
         _launcher = LaunchManager(
@@ -53,6 +55,10 @@ def create_app() -> FastAPI:
         )
         _domain.subscribe()
         set_robot_domain(_domain)
+
+        _cup_domain = CupDetectionDomain(bridge, _launcher)
+        _cup_domain.subscribe()
+        set_cup_detection_domain(_cup_domain)
 
         logger.info("robot service started on port %d", settings.ports.robot)
         yield
@@ -110,12 +116,36 @@ def create_app() -> FastAPI:
                         "log": active.log_lines[-5:],
                     })
                 else:
-                    await ws.send_json({"task": None, "status": "idle", "log": []})
+                    bringup = _launcher.bringup_task
+                    if bringup is not None:
+                        await ws.send_json({
+                            "task": bringup.name,
+                            "status": bringup.status.value,
+                            "log": bringup.log_lines[-5:],
+                        })
+                    else:
+                        await ws.send_json({"task": None, "status": "idle", "log": []})
                 await asyncio.sleep(0.5)
         except WebSocketDisconnect:
             pass
         except Exception:
             logger.exception("task log ws error")
+            await ws.close(code=1011)
+
+    @app.websocket("/ws/cups")
+    async def ws_cups(ws: WebSocket) -> None:
+        await ws.accept()
+        if _cup_domain is None:
+            await ws.close(code=503, reason="Not initialized")
+            return
+        try:
+            while True:
+                await ws.send_json(_cup_domain.get_cups())
+                await asyncio.sleep(0.1)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.exception("cups ws error")
             await ws.close(code=1011)
 
     return app

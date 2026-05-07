@@ -18,7 +18,7 @@ from ..config import WorkspaceConfig
 logger = logging.getLogger(__name__)
 
 BRINGUP_COMMANDS = {"bringup_sim", "bringup_real"}
-SERVICE_COMMANDS = {"move_cartesian"}  # long-running service nodes, not one-shot tasks
+SERVICE_COMMANDS = {"move_cartesian", "cup_detection"}  # long-running service nodes, not one-shot tasks
 
 # Substrings that make a log line too noisy to show in the dashboard feed
 _LOG_NOISE = frozenset([

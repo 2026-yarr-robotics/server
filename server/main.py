@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import AppSettings
+from .domains.cup_detection import CupDetectionDomain
 from .domains.handineye import HandInEyeDomain
 from .domains.handtoeye import HandToEyeDomain
 from .domains.robot import RobotDomain
@@ -72,10 +73,14 @@ async def lifespan(app: FastAPI):
         handtoeye_domain.on_camera_info,
     )
 
+    cup_detection_domain = CupDetectionDomain(bridge, launcher)
+    cup_detection_domain.subscribe()
+
     robot.set_robot_domain(robot_domain)
+    robot.set_cup_detection_domain(cup_detection_domain)
     handineye.set_handineye_domain(handineye_domain)
     handtoeye.set_handtoeye_domain(handtoeye_domain)
-    dashboard.set_dashboard_deps(robot_domain, camera_mgr, launcher)
+    dashboard.set_dashboard_deps(robot_domain, camera_mgr, launcher, cup_detection_domain)
 
     logger.info("cup_stack server started")
     yield

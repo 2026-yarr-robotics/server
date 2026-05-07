@@ -7,6 +7,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from ..domains.cup_detection import CupDetectionDomain
 from ..domains.robot import RobotDomain
 from ..ros.launch import LaunchManager
 from ..services.camera import CameraManager
@@ -18,17 +19,20 @@ router = APIRouter(tags=["websocket"])
 robot_domain: RobotDomain | None = None
 camera_manager: CameraManager | None = None
 launch_manager: LaunchManager | None = None
+cup_detection_domain: CupDetectionDomain | None = None
 
 
 def set_dashboard_deps(
     robot: RobotDomain,
     cameras: CameraManager,
     launcher: LaunchManager,
+    cup_detection: CupDetectionDomain | None = None,
 ) -> None:
-    global robot_domain, camera_manager, launch_manager
+    global robot_domain, camera_manager, launch_manager, cup_detection_domain
     robot_domain = robot
     camera_manager = cameras
     launch_manager = launcher
+    cup_detection_domain = cup_detection
 
 
 @router.websocket("/ws/robot/state")
@@ -84,17 +88,42 @@ async def ws_task_log(ws: WebSocket) -> None:
         while True:
             active = launch_manager.active_action_task
             if active is not None:
-                logs = active.log_lines[-5:]
                 await ws.send_json({
                     "task": active.name,
                     "status": active.status.value,
-                    "log": logs,
+                    "log": active.log_lines[-5:],
                 })
             else:
-                await ws.send_json({"task": None, "status": "idle", "log": []})
+                bringup = launch_manager.bringup_task
+                if bringup is not None:
+                    await ws.send_json({
+                        "task": bringup.name,
+                        "status": bringup.status.value,
+                        "log": bringup.log_lines[-5:],
+                    })
+                else:
+                    await ws.send_json({"task": None, "status": "idle", "log": []})
             await asyncio.sleep(0.5)
     except WebSocketDisconnect:
         pass
     except Exception:
         logger.exception("Error in task log WebSocket")
+        await ws.close(code=1011)
+
+
+@router.websocket("/ws/cups")
+async def ws_cups(ws: WebSocket) -> None:
+    await ws.accept()
+    if cup_detection_domain is None:
+        await ws.close(code=503, reason="Cup detection domain not initialized")
+        return
+
+    try:
+        while True:
+            await ws.send_json(cup_detection_domain.get_cups())
+            await asyncio.sleep(0.1)
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        logger.exception("Error in cups WebSocket")
         await ws.close(code=1011)

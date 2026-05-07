@@ -4,10 +4,13 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
+from ..domains.cup_detection import CupDetectionDomain
 from ..domains.robot import RobotDomain
 from ..ros.launch import ALL_COMMANDS
 from ..schemas import (
     BringupRequest,
+    CupDetectionFrame,
+    CupTriggerRequest,
     EEPositionSchema,
     GripperRequest,
     GripperResponse,
@@ -25,6 +28,7 @@ from ..schemas import (
 router = APIRouter(prefix="/api/robot", tags=["robot"])
 
 robot_domain: RobotDomain | None = None
+cup_detection_domain: CupDetectionDomain | None = None
 
 
 def set_robot_domain(domain: RobotDomain) -> None:
@@ -32,10 +36,21 @@ def set_robot_domain(domain: RobotDomain) -> None:
     robot_domain = domain
 
 
+def set_cup_detection_domain(domain: CupDetectionDomain) -> None:
+    global cup_detection_domain
+    cup_detection_domain = domain
+
+
 def _get_domain() -> RobotDomain:
     if robot_domain is None:
         raise HTTPException(status_code=503, detail="Robot domain not initialized")
     return robot_domain
+
+
+def _get_cup_domain() -> CupDetectionDomain:
+    if cup_detection_domain is None:
+        raise HTTPException(status_code=503, detail="Cup detection domain not initialized")
+    return cup_detection_domain
 
 
 @router.get("/status", response_model=RobotStatusResponse)
@@ -90,6 +105,8 @@ async def stop_task(body: TaskStopRequest) -> dict:
 async def get_task_log(name: str = "", tail: int = 50) -> dict:
     if not name:
         raise HTTPException(status_code=400, detail="Missing 'name' query param")
+    if not (1 <= tail <= 500):
+        raise HTTPException(status_code=400, detail="tail must be between 1 and 500")
 
     domain = _get_domain()
     try:
@@ -137,3 +154,24 @@ async def move_robot(body: MoveRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/cups", response_model=CupDetectionFrame)
+async def get_cups() -> dict:
+    return _get_cup_domain().get_cups()
+
+
+@router.post("/cups/trigger", response_model=TaskStartedResponse)
+async def trigger_cup_task(body: CupTriggerRequest) -> dict:
+    domain = _get_cup_domain()
+    try:
+        return await domain.trigger_task(body.cup_id, body.task)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except KeyError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        detail = str(e)
+        if "cup_detection task is not running" in detail:
+            raise HTTPException(status_code=503, detail=detail)
+        raise HTTPException(status_code=409, detail=detail)
