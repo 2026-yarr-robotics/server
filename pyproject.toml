@@ -13,7 +13,6 @@ dependencies = [
     "roslibpy>=1.3",
     "opencv-python>=4.8",
     "numpy>=1.24",
-    "pyyaml>=5.4",
 ]
 
 [project.optional-dependencies]

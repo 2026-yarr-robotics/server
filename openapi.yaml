@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Cup Stack Server API
-  version: 1.0.0
+  version: 0.1.0
   description: |
     Doosan M0609 컵 스태킹 로봇 제어 서버의 REST API.
 
@@ -10,6 +10,9 @@ info:
     - **robot**: 8001
     - **handineye**: 8002
     - **handtoeye**: 8003
+
+    > 이 파일은 참조용 문서입니다. 실제 Swagger UI는 FastAPI가 코드에서 자동 생성합니다.
+    > 각 서비스의 `/docs` 엔드포인트에서 확인할 수 있습니다.
 
 servers:
   - url: http://localhost:8001
@@ -35,7 +38,7 @@ paths:
     get:
       tags: [robot]
       summary: 로봇 상태 조회
-      description: 현재 관절 상태, 활성 태스크, 전체 태스크 목록을 반환한다.
+      description: 관절 상태, 활성 태스크, bringup 상태, EE 위치, 전체 태스크 목록을 반환한다.
       responses:
         "200":
           description: 성공
@@ -53,6 +56,7 @@ paths:
       description: |
         `mode=sim`이면 시뮬레이션 bringup 스크립트를 실행하고,
         `mode=real`이면 실로봇 bringup 스크립트를 `ip` 인자와 함께 실행한다.
+        bringup 완료 20초 후 `move_cartesian` 서비스 노드가 자동 시작된다.
       requestBody:
         required: true
         content:
@@ -87,6 +91,7 @@ paths:
       description: |
         지정한 ROS 2 launch 태스크를 시작한다.
         이미 실행 중인 태스크가 있으면 409를 반환한다.
+        `move_cartesian`은 서비스 노드이므로 액션 태스크와 동시에 실행 가능하다.
       requestBody:
         required: true
         content:
@@ -121,7 +126,7 @@ paths:
     post:
       tags: [robot]
       summary: 태스크 중지
-      description: 실행 중인 태스크에 SIGINT를 보내고 최대 10초 후 SIGKILL로 강제 종료한다.
+      description: 실행 중인 태스크에 SIGINT를 보내고 최대 10초 후 SIGKILL로 강제 종료한다. 이미 정지된 태스크에 대해서는 즉시 반환한다(멱등).
       requestBody:
         required: true
         content:
@@ -148,7 +153,7 @@ paths:
     get:
       tags: [robot]
       summary: 태스크 로그 조회
-      description: 지정한 태스크의 최근 stdout 라인을 반환한다.
+      description: 지정한 태스크의 최근 stdout 라인을 반환한다. MoveIt 노이즈 라인은 필터링된다.
       parameters:
         - name: name
           in: query
@@ -177,6 +182,127 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/position:
+    get:
+      tags: [robot]
+      summary: EE 위치 조회
+      description: |
+        마지막으로 명령한 엔드이펙터 위치(x, y, z)를 반환한다.
+        `/api/robot/move`로 이동 명령을 내리기 전까지는 404가 반환된다.
+      responses:
+        "200":
+          description: 마지막 명령 위치
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EEPosition"
+              example:
+                x: 0.35
+                y: 0.0
+                z: 0.40
+        "404":
+          description: 아직 이동 명령이 없어 위치 미확인
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/workspace/limits:
+    get:
+      tags: [robot]
+      summary: 작업공간 한계 조회
+      description: 현재 설정된 작업공간 좌표 한계 및 그리드 간격을 반환한다.
+      responses:
+        "200":
+          description: 작업공간 한계
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceLimitsResponse"
+              example:
+                x_min: -0.5
+                x_max: 0.5
+                y_min: -0.5
+                y_max: 0.5
+                z_min: 0.25
+                z_max: 0.55
+                grid_spacing: 0.05
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/gripper:
+    post:
+      tags: [robot]
+      summary: 그리퍼 제어
+      description: |
+        OnRobot RG2/RG6 그리퍼를 열거나 닫는다.
+        `move_cartesian` 서비스 노드가 실행 중이어야 한다.
+        하드웨어 미연결 시 `success=false`를 반환한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GripperRequest"
+            examples:
+              open:
+                summary: 열기
+                value: { command: open }
+              close:
+                summary: 닫기
+                value: { command: close }
+      responses:
+        "200":
+          description: 그리퍼 동작 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GripperResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/move:
+    post:
+      tags: [robot]
+      summary: EE 이동
+      description: |
+        로봇 엔드이펙터를 지정한 좌표로 이동한다.
+        `mode=absolute`이면 `base_link` 기준 절대 좌표, `mode=relative`이면 현재 위치에서의 델타.
+        목표 좌표가 작업공간 한계를 벗어나면 자동으로 클램핑된다.
+        `move_cartesian` 서비스 노드가 실행 중이어야 한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MoveRequest"
+            examples:
+              absolute:
+                summary: 절대 좌표
+                value: { x: 0.35, y: 0.0, z: 0.40, mode: absolute }
+              relative:
+                summary: 상대 이동
+                value: { x: 0.05, y: 0.0, z: 0.0, mode: relative }
+      responses:
+        "200":
+          description: 이동 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MoveResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
@@ -305,21 +431,28 @@ components:
             type: number
             format: double
           description: 라디안
-          example: [0.0, 0.0, 1.5708, 0.0, 1.5708, 1.5708]
         velocity:
           type: array
           items:
             type: number
             format: double
           description: 라디안/s
-          example: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         effort:
           type: array
           items:
             type: number
             format: double
           description: N·m
-          example: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+
+    ActiveTask:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+          example: cup_pyramid_web
+        status:
+          $ref: "#/components/schemas/TaskStatus"
 
     TaskSummary:
       type: object
@@ -338,28 +471,73 @@ components:
           description: 프로세스 종료 시 null
           example: 12345
 
-    ActiveTask:
+    EEPosition:
       type: object
+      required: [x, y, z]
       properties:
-        name:
-          type: string
-          nullable: true
-          example: cup_pyramid_web
-        status:
-          $ref: "#/components/schemas/TaskStatus"
+        x:
+          type: number
+          format: double
+          description: base_link X (m)
+        y:
+          type: number
+          format: double
+          description: base_link Y (m)
+        z:
+          type: number
+          format: double
+          description: base_link Z (m)
 
     RobotStatusResponse:
       type: object
-      required: [joints, task, tasks]
+      required: [joints, task, bringup, tasks]
       properties:
         joints:
           $ref: "#/components/schemas/JointState"
         task:
           $ref: "#/components/schemas/ActiveTask"
+        bringup:
+          $ref: "#/components/schemas/ActiveTask"
         tasks:
           type: array
           items:
             $ref: "#/components/schemas/TaskSummary"
+        ee_position:
+          $ref: "#/components/schemas/EEPosition"
+          nullable: true
+
+    WorkspaceLimitsResponse:
+      type: object
+      required: [x_min, x_max, y_min, y_max, z_min, z_max, grid_spacing]
+      properties:
+        x_min:
+          type: number
+          format: double
+          example: -0.5
+        x_max:
+          type: number
+          format: double
+          example: 0.5
+        y_min:
+          type: number
+          format: double
+          example: -0.5
+        y_max:
+          type: number
+          format: double
+          example: 0.5
+        z_min:
+          type: number
+          format: double
+          example: 0.25
+        z_max:
+          type: number
+          format: double
+          example: 0.55
+        grid_spacing:
+          type: number
+          format: double
+          example: 0.05
 
     BringupRequest:
       type: object
@@ -389,6 +567,7 @@ components:
             - cup_unstack_select
             - cup_pyramid_web
             - cup_unstack_web
+            - move_cartesian
             - bringup_sim
             - bringup_real
           description: |
@@ -402,6 +581,7 @@ components:
             | `cup_unstack_select` | OpenCV 클릭으로 위치 선택 후 언스택 |
             | `cup_pyramid_web` | 픽셀 좌표(`pixel_x`, `pixel_y`) 기반 피라미드 빌드 |
             | `cup_unstack_web` | 픽셀 좌표(`pixel_x`, `pixel_y`) 기반 언스택 |
+            | `move_cartesian` | `/move_cartesian` + `/gripper_control` ROS 서비스 노드 |
           example: cup_pyramid_web
         args:
           type: object
@@ -431,7 +611,7 @@ components:
 
     TaskStartedResponse:
       type: object
-      required: [name, status, pid]
+      required: [name, status]
       properties:
         name:
           type: string
@@ -440,6 +620,7 @@ components:
           $ref: "#/components/schemas/TaskStatus"
         pid:
           type: integer
+          nullable: true
           example: 12346
 
     TaskStoppedResponse:
@@ -468,6 +649,58 @@ components:
             - "[INFO] Moving HOME"
             - "[INFO] CYCLE 1/6 pick(stack=6, z=0.386)"
             - "[INFO] GRIP"
+
+    GripperRequest:
+      type: object
+      required: [command]
+      properties:
+        command:
+          type: string
+          enum: [open, close]
+          description: 그리퍼 동작 명령
+
+    GripperResponse:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+          example: "Gripper opened"
+
+    MoveRequest:
+      type: object
+      required: [x, y, z]
+      properties:
+        x:
+          type: number
+          format: double
+          description: base_link X (m)
+        y:
+          type: number
+          format: double
+          description: base_link Y (m)
+        z:
+          type: number
+          format: double
+          description: base_link Z (m)
+        mode:
+          type: string
+          enum: [absolute, relative]
+          default: absolute
+
+    MoveResponse:
+      type: object
+      required: [success, message]
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        position:
+          $ref: "#/components/schemas/EEPosition"
+          nullable: true
 
     # ── Calibration ──
 

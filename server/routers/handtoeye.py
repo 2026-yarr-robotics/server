@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, HTTPException
 
 from ..domains.handtoeye import HandToEyeDomain
+from ..schemas import CalibrationResponse, CalibrationUpdateRequest
 
 router = APIRouter(prefix="/api/handtoeye", tags=["handtoeye"])
 
@@ -24,14 +23,11 @@ def _get_domain() -> HandToEyeDomain:
     return handtoeye_domain
 
 
-@router.get("/calibration")
-async def get_calibration() -> dict[str, Any]:
+@router.get("/calibration", response_model=CalibrationResponse)
+async def get_calibration() -> dict:
     return _get_domain().get_calibration()
 
 
-@router.put("/calibration")
-async def update_calibration(body: dict[str, Any]) -> dict[str, Any]:
-    matrix_data = body.get("matrix")
-    if not matrix_data:
-        raise HTTPException(status_code=400, detail="Missing 'matrix' field")
-    return _get_domain().update_calibration(matrix_data)
+@router.put("/calibration", response_model=CalibrationResponse)
+async def update_calibration(body: CalibrationUpdateRequest) -> dict:
+    return _get_domain().update_calibration(body.matrix)

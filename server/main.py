@@ -4,11 +4,8 @@ from __future__ import annotations
 
 import logging
 from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Any
 
 import uvicorn
-import yaml
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -89,27 +86,16 @@ async def lifespan(app: FastAPI):
     logger.info("cup_stack server stopped")
 
 
-_OPENAPI_YAML = Path(__file__).resolve().parents[1] / "openapi.yaml"
-
-
-def _load_openapi_spec() -> dict[str, Any] | None:
-    if not _OPENAPI_YAML.exists():
-        logger.warning("openapi.yaml not found at %s", _OPENAPI_YAML)
-        return None
-    with _OPENAPI_YAML.open(encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="cup_stack Server",
+        title="Cup Stack Server API",
         version="0.1.0",
+        description=(
+            "Doosan M0609 컵 스태킹 로봇 제어 서버.\n\n"
+            "서비스별 포트: **robot** 8001 · **handineye** 8002 · **handtoeye** 8003"
+        ),
         lifespan=lifespan,
     )
-
-    spec = _load_openapi_spec()
-    if spec is not None:
-        app.openapi_schema = spec
 
     app.add_middleware(
         CORSMiddleware,
