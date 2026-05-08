@@ -117,7 +117,7 @@ def create_app() -> FastAPI:
                     })
                 else:
                     bringup = _launcher.bringup_task
-                    if bringup is not None:
+                    if bringup is not None and bringup.status.value == "running":
                         await ws.send_json({
                             "task": bringup.name,
                             "status": bringup.status.value,
