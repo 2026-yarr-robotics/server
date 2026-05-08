@@ -16,6 +16,7 @@ from ..schemas import (
     GripperResponse,
     MoveRequest,
     MoveResponse,
+    PixelToWorldResponse,
     RobotStatusResponse,
     TaskLogResponse,
     TaskStartedResponse,
@@ -154,6 +155,15 @@ async def move_robot(body: MoveRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.get("/pixel-to-world", response_model=PixelToWorldResponse)
+async def pixel_to_world(px: int, py: int) -> dict:
+    domain = _get_domain()
+    try:
+        return domain.pixel_to_world(px, py)
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 @router.get("/cups", response_model=CupDetectionFrame)

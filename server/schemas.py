@@ -152,3 +152,14 @@ class CalibrationResponse(BaseModel):
 
 class CalibrationUpdateRequest(BaseModel):
     matrix: list[list[float]] = Field(..., description="4×4 동차 변환 행렬 (mm 단위)")
+
+
+# ── Pixel → World ──────────────────────────────────────────────────────────────
+
+class PixelToWorldResponse(BaseModel):
+    x: float = Field(..., description="base_link X (m)")
+    y: float = Field(..., description="base_link Y (m)")
+    z: float = Field(..., description="base_link Z (m)")
+    depth_mm: int = Field(..., description="픽셀 깊이 (mm)")
+    pixel_x: int
+    pixel_y: int

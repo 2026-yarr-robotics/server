@@ -52,6 +52,9 @@ def create_app() -> FastAPI:
             bridge,
             _launcher,
             settings.robot.joint_states,
+            config_dir=settings.workspace.config_dir,
+            camera_info_topic=settings.cameras.handineye_info,
+            depth_topic=settings.cameras.handineye_depth,
         )
         _domain.subscribe()
         set_robot_domain(_domain)
