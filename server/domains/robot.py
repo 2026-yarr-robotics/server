@@ -131,21 +131,11 @@ class RobotDomain:
         args: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         task = await self._launcher.start(command, args)
-        if command in BRINGUP_COMMANDS:
-            asyncio.create_task(self._auto_start_services())
         return {
             "name": task.name,
             "status": task.status.value,
             "pid": task.process.pid if task.process else None,
         }
-
-    async def _auto_start_services(self) -> None:
-        await asyncio.sleep(20)
-        try:
-            await self._launcher.start("move_cartesian")
-            logger.info("move_cartesian service auto-started")
-        except Exception as e:
-            logger.warning("move_cartesian auto-start failed: %s", e)
 
     async def stop_task(self, name: str) -> dict[str, Any]:
         await self._launcher.stop(name)
