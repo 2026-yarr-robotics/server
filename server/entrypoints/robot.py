@@ -109,25 +109,45 @@ def create_app() -> FastAPI:
         if _launcher is None:
             await ws.close(code=503, reason="Not initialized")
             return
+
+        last_task_name: str | None = None
+        log_cursor: int = 0
+
         try:
             while True:
                 active = _launcher.active_action_task
-                if active is not None:
-                    await ws.send_json({
-                        "task": active.name,
-                        "status": active.status.value,
-                        "log": active.log_lines[-5:],
-                    })
-                else:
+                task = active
+                if task is None:
                     bringup = _launcher.bringup_task
                     if bringup is not None and bringup.status.value == "running":
+                        task = bringup
+
+                if task is None:
+                    last_task_name = None
+                    log_cursor = 0
+                    await ws.send_json({"task": None, "status": "idle", "log": []})
+                else:
+                    if task.name != last_task_name:
+                        last_task_name = task.name
+                        log_cursor = len(task.log_lines)
+
+                    log_cursor = min(log_cursor, len(task.log_lines))
+                    new_lines = task.log_lines[log_cursor:]
+                    log_cursor = len(task.log_lines)
+
+                    if new_lines:
                         await ws.send_json({
-                            "task": bringup.name,
-                            "status": bringup.status.value,
-                            "log": bringup.log_lines[-5:],
+                            "task": task.name,
+                            "status": task.status.value,
+                            "log": new_lines,
                         })
                     else:
-                        await ws.send_json({"task": None, "status": "idle", "log": []})
+                        await ws.send_json({
+                            "task": task.name,
+                            "status": task.status.value,
+                            "log": [],
+                        })
+
                 await asyncio.sleep(0.5)
         except WebSocketDisconnect:
             pass

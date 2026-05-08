@@ -25,6 +25,10 @@ _LOG_NOISE = frozenset([
     "returned 1 controllers in list",
     "Trajectory execution is managing controllers",
     "services ready",
+    "monitored_planning_scene",
+    "Sending request for interactive markers",
+    "Service response received for initialization",
+    "Waiting for '/controller_manager'",
 ])
 TASK_COMMANDS = {
     "cup_pyramid",

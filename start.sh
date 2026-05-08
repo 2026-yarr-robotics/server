@@ -53,9 +53,10 @@ tmux send-keys -t "$SESSION:bringup-agent" \
     "python3 $SCRIPT_DIR/bringup_agent.py" Enter
 
 # ── 창 3: Docker 서버 (nginx + FastAPI + cloudflared) ────
+# -d 로 컨테이너를 분리 실행 → tmux 세션이 종료돼도 컨테이너가 유지됨
 tmux new-window -t "$SESSION" -n "server"
 tmux send-keys -t "$SESSION:server" \
-    "cd $SCRIPT_DIR && docker compose up" Enter
+    "cd $SCRIPT_DIR && docker compose up -d && docker compose logs -f" Enter
 
 # ── 포커스 ──────────────────────────────────────────────
 tmux select-window -t "$SESSION:rosbridge"

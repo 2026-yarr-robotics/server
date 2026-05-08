@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import signal
+import socketserver
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -168,18 +169,13 @@ class _Handler(BaseHTTPRequestHandler):
                 proc = _task_procs.get(command)
 
             if proc is not None and proc.poll() is None:
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-                except ProcessLookupError:
-                    pass
-                with _tasks_lock:
-                    _task_statuses[command] = "idle"
-                logger.info("SIGINT sent to task '%s' (pid=%d)", command, proc.pid)
-                self._json({"status": "stopped"})
-            else:
-                with _tasks_lock:
-                    _task_statuses[command] = "idle"
-                self._json({"status": "not running"})
+                logger.info("stopping task '%s' (pid=%d)…", command, proc.pid)
+                _kill_proc(proc)
+                logger.info("task '%s' stopped (rc=%s)", command, proc.poll())
+
+            with _tasks_lock:
+                _task_statuses[command] = "idle"
+            self._json({"status": "stopped"})
 
         elif self.path == "/start":
             with _lock:
@@ -216,18 +212,13 @@ class _Handler(BaseHTTPRequestHandler):
                 proc = _proc
 
             if proc is not None and proc.poll() is None:
-                try:
-                    os.killpg(os.getpgid(proc.pid), signal.SIGINT)
-                except ProcessLookupError:
-                    pass
-                with _lock:
-                    _status = "idle"
-                logger.info("SIGINT sent to bringup (pid=%d)", proc.pid)
-                self._json({"status": "stopped"})
-            else:
-                with _lock:
-                    _status = "idle"
-                self._json({"status": "not running"})
+                logger.info("stopping bringup (pid=%d)…", proc.pid)
+                _kill_proc(proc)
+                logger.info("bringup stopped (rc=%s)", proc.poll())
+
+            with _lock:
+                _status = "idle"
+            self._json({"status": "stopped"})
 
         else:
             self._json({"error": "not found"}, 404)
@@ -244,9 +235,34 @@ class _Handler(BaseHTTPRequestHandler):
         pass
 
 
+class _ThreadingHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+
+
+def _kill_proc(proc: subprocess.Popen, timeout_sigint: float = 10.0) -> None:
+    """Send SIGINT; wait for graceful exit; escalate to SIGKILL if needed."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGINT)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=timeout_sigint)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        pass
+
+
 def main() -> None:
     logger.info("cup_stack dir: %s", CUP_STACK_DIR)
-    server = HTTPServer(("0.0.0.0", PORT), _Handler)
+    server = _ThreadingHTTPServer(("0.0.0.0", PORT), _Handler)
     logger.info("bringup agent listening on http://0.0.0.0:%d", PORT)
     try:
         server.serve_forever()
