@@ -280,24 +280,55 @@ class RobotDomain:
         z: float,
         mode: str = "absolute",
     ) -> dict[str, Any]:
-        """Move robot end-effector to specified position."""
-        clamped = self._validate_target(x, y, z)
-        if clamped is None:
-            raise ValueError("Invalid target position")
+        """Move robot end-effector via Doosan /motion/move_line (no MoveItPy)."""
+        if mode == "relative":
+            # Relative delta — no clamping; orientation delta is zero
+            req = {
+                "pos": [x * 1000.0, y * 1000.0, z * 1000.0, 0.0, 0.0, 0.0],
+                "vel": [50.0, 30.0],
+                "acc": [100.0, 60.0],
+                "time": 0.0,
+                "radius": 0.0,
+                "ref": 0,
+                "mode": 1,         # DR_MV_MOD_REL
+                "blend_type": 0,
+                "sync_type": 0,    # SYNC (blocking)
+            }
+        else:
+            # Absolute Cartesian move; keep tool pointing down (ry=180°)
+            clamped = self._validate_target(x, y, z)
+            target_x, target_y, target_z = clamped
+            req = {
+                "pos": [target_x * 1000.0, target_y * 1000.0, target_z * 1000.0, 0.0, 180.0, 0.0],
+                "vel": [50.0, 30.0],
+                "acc": [100.0, 60.0],
+                "time": 0.0,
+                "radius": 0.0,
+                "ref": 0,
+                "mode": 0,         # DR_MV_MOD_ABS
+                "blend_type": 0,
+                "sync_type": 0,
+            }
 
-        target_x, target_y, target_z = clamped
+        try:
+            result = await self._bridge.call_service(
+                "/motion/move_line",
+                "dsr_msgs2/srv/MoveLine",
+                req,
+                timeout=30.0,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(f"Move failed: {exc}") from exc
 
-        result = await self._bridge.call_service(
-            "/move_cartesian",
-            "cup_stack_interfaces/srv/MoveCartesian",
-            {"x": target_x, "y": target_y, "z": target_z, "mode": mode},
-        )
-        base = result if result else {"success": False, "message": "Service call failed"}
-
-        if base.get("success"):
+        ok = bool(result.get("success", False)) if result else False
+        if ok and mode != "relative":
             self._commanded_pos = {"x": target_x, "y": target_y, "z": target_z}
 
-        return {**base, "position": self._commanded_pos}
+        return {
+            "success": ok,
+            "message": "Moved" if ok else "Move command failed",
+            "position": self._commanded_pos,
+        }
 
     def _get_ee_matrix(self) -> np.ndarray | None:
         target, base = "link_6", "base_link"

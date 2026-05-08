@@ -18,7 +18,7 @@ from ..config import WorkspaceConfig
 logger = logging.getLogger(__name__)
 
 BRINGUP_COMMANDS = {"bringup_sim", "bringup_real"}
-SERVICE_COMMANDS = {"cup_detection"}  # move_cartesian disabled; tasks own their MoveItPy instance
+SERVICE_COMMANDS = {"cup_detection", "gripper"}  # gripper: Modbus-only, no MoveItPy conflict
 
 # Substrings that make a log line too noisy to show in the dashboard feed
 _LOG_NOISE = frozenset([
