@@ -57,6 +57,7 @@ class RobotDomain:
         self._joint_topic = joint_states_topic
         self._subscribed = False
         self._commanded_pos: dict[str, float] | None = None
+        self._ee_pos_ros: dict[str, float] | None = None
         self._move_limits = MoveLimits(
             x_min=workspace_limits.x_min if workspace_limits else -0.5,
             x_max=workspace_limits.x_max if workspace_limits else 0.5,
@@ -99,7 +100,22 @@ class RobotDomain:
             self._on_joint_state,
             throttle_rate=100,
         )
+        self._bridge.subscribe(
+            "/ee_pose",
+            "geometry_msgs/msg/PoseStamped",
+            self._on_ee_pose,
+            throttle_rate=200,
+        )
         self._subscribed = True
+
+    def _on_ee_pose(self, msg: dict[str, Any]) -> None:
+        pos = msg.get("pose", {}).get("position", {})
+        if pos:
+            self._ee_pos_ros = {
+                "x": float(pos.get("x", 0.0)),
+                "y": float(pos.get("y", 0.0)),
+                "z": float(pos.get("z", 0.0)),
+            }
 
     def _on_joint_state(self, msg: dict[str, Any]) -> None:
         self._status.joints = JointState(
@@ -136,11 +152,12 @@ class RobotDomain:
         return {"name": name, "status": "stopped"}
 
     def get_ee_position(self) -> dict[str, float] | None:
-        return self._commanded_pos
+        return self._ee_pos_ros if self._ee_pos_ros is not None else self._commanded_pos
 
     def get_status(self) -> dict[str, Any]:
         s = self.status
         bringup = self._launcher.bringup_task
+        ee_pos = self._ee_pos_ros if self._ee_pos_ros is not None else self._commanded_pos
         return {
             "joints": {
                 "name": s.joints.name,
@@ -157,7 +174,7 @@ class RobotDomain:
                 "status": bringup.status.value if bringup else "idle",
             },
             "tasks": self._launcher.list_tasks(),
-            "ee_position": self._commanded_pos,
+            "ee_position": ee_pos,
         }
 
     async def gripper_control(self, command: str) -> dict[str, Any]:
