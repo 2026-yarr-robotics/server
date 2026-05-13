@@ -1,0 +1,36 @@
+name: Deploy Server
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: false
+        default: 'main'
+        type: string
+
+jobs:
+  deploy:
+    name: Deploy to ssu-22663-27
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 100.95.110.25
+          username: eunwoosong
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -e
+            cd /home/eunwoosong/cup-stack/server
+            git pull origin ${{ inputs.branch }}
+            docker compose up --build -d
+            echo "Deploy complete: $(date)"
