@@ -15,6 +15,29 @@
 
 ---
 
+## 0. 사전 요구사항
+
+Ubuntu 22.04 LTS 기준입니다. 아래 도구가 없으면 먼저 설치합니다.
+
+### Docker
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+newgrp docker          # 또는 로그아웃 후 재로그인
+
+docker --version
+docker compose version
+```
+
+### 기타 패키지
+
+```bash
+sudo apt update && sudo apt install -y git curl unzip
+```
+
+---
+
 ## 1. RustDesk 자체 호스팅 서버
 
 ### 개요
@@ -188,8 +211,8 @@ cloudflared tunnel route dns yarr-api yarr-api.simplyimg.com
 `server/cloudflared/config.yml` 생성:
 
 ```yaml
-tunnel: <UUID>           # 위에서 발급받은 UUID
-credentials-file: /etc/cloudflared/<UUID>.json
+tunnel: 4ffcfc13-173e-468f-8623-cab1fa0813c5
+credentials-file: /etc/cloudflared/4ffcfc13-173e-468f-8623-cab1fa0813c5.json
 
 ingress:
   - hostname: yarr-api.simplyimg.com
@@ -201,14 +224,14 @@ ingress:
 
 ### 2-5. Docker Compose에 cloudflared 서비스 추가
 
-`server/docker-compose.yml`의 `networks:` 블록 위에 추가:
+`server/docker-compose.yml`의 cloudflared 서비스:
 
 ```yaml
   cloudflared:
     image: cloudflare/cloudflared:latest
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
-      - /home/<USER>/.cloudflared/<UUID>.json:/etc/cloudflared/<UUID>.json:ro
+      - ~/.cloudflared/4ffcfc13-173e-468f-8623-cab1fa0813c5.json:/etc/cloudflared/4ffcfc13-173e-468f-8623-cab1fa0813c5.json:ro
       - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
     depends_on:
       - nginx
@@ -217,16 +240,10 @@ ingress:
     restart: unless-stopped
 ```
 
-`<USER>`와 `<UUID>`를 실제 값으로 교체합니다.
-
 ### 2-6. 자격증명 파일 보호
 
-```bash
-# .gitignore에 추가 (커밋 방지)
-echo "*.json" >> server/.gitignore
-```
-
-`config.yml`(UUID만 포함)은 커밋 가능하지만 `.json` 자격증명은 절대 커밋하지 않습니다.
+`server/.gitignore`에 이미 `*.json`이 등록되어 있어 자격증명이 커밋되지 않습니다.  
+`config.yml`(UUID만 포함)은 커밋 가능합니다.
 
 ### 2-7. 기동 및 검증
 
@@ -234,12 +251,16 @@ echo "*.json" >> server/.gitignore
 cd server
 docker compose up --build -d
 
-# 헬스체크
+# REST 헬스체크
 curl https://yarr-api.simplyimg.com/health
 # 기댓값: ok
 
+# WebSocket 검증 (wscat 필요: npm i -g wscat)
+wscat -c wss://yarr-api.simplyimg.com/ws/robot/state
+
 # Cloudflare 대시보드에서도 확인
 # Zero Trust > Networks > Tunnels → HEALTHY 상태 확인
+# 터널이 HEALTHY 상태가 되어야 DNS가 활성화됩니다 (보통 30초 이내)
 ```
 
 ### 2-8. 시스템 서비스로 실행 (Docker 없이)
@@ -252,7 +273,14 @@ sudo systemctl enable cloudflared
 sudo systemctl start cloudflared
 ```
 
-자격증명은 `/etc/cloudflared/<UUID>.json`에 복사해야 합니다.
+자격증명 파일을 `/etc/cloudflared/`에 복사한 뒤 설치합니다:
+
+```bash
+sudo cp ~/.cloudflared/4ffcfc13-173e-468f-8623-cab1fa0813c5.json /etc/cloudflared/
+sudo cloudflared service install
+sudo systemctl enable cloudflared
+sudo systemctl start cloudflared
+```
 
 ---
 
@@ -385,4 +413,52 @@ Tailscale can't reach the configured DNS servers.
 
 ```bash
 sudo tailscale up --accept-dns=false   # MagicDNS 비활성화 (필요시)
+```
+
+### RustDesk 클라이언트 "Key mismatch" 오류
+
+서버를 재설치하면 `id_ed25519` 키가 새로 생성되어 기존 클라이언트 설정의 Key가 무효화됩니다.
+
+```bash
+# 새 공개키 확인
+cat /opt/rustdesk/id_ed25519.pub
+```
+
+출력 값을 클라이언트 설정의 **Key** 필드에 다시 입력합니다.
+
+### Docker 컨테이너 비정상 종료
+
+```bash
+# 전체 컨테이너 상태 확인
+docker compose ps
+
+# 특정 서비스 로그 (예: cloudflared)
+docker compose logs --tail=50 cloudflared
+
+# 자격증명 파일 마운트 경로 확인
+ls -la ~/.cloudflared/
+# 4ffcfc13-173e-468f-8623-cab1fa0813c5.json 이 있어야 함
+
+# 재시작
+docker compose restart cloudflared
+```
+
+---
+
+## 신규 서버 초기화 체크리스트
+
+이 서버(`ssu-22663-24`)와 동일한 환경을 새 머신에서 재현할 때의 순서입니다.
+
+```
+[ ] 1. Docker 설치 및 docker 그룹 추가 (섹션 0)
+[ ] 2. Tailscale 설치 → sudo tailscale up → 인증 완료 (섹션 3-1, 3-2)
+        → 이후 모든 작업은 Tailscale IP로 SSH 접근 가능
+[ ] 3. RustDesk 서버 설치 → systemd 서비스 등록 → 포트 개방 (섹션 1-1 ~ 1-4)
+        → 공개키 확인 후 RustDesk 클라이언트 Key 업데이트 (섹션 1-5, 1-6)
+[ ] 4. Cloudflare 자격증명 이전 (섹션 2-5)
+        기존 서버에서: scp ~/.cloudflared/4ffcfc13-173e-468f-8623-cab1fa0813c5.json <새서버>:~/.cloudflared/
+        (또는 cloudflared tunnel login 으로 재인증 → ~/.cloudflared/cert.pem + UUID.json 재발급)
+[ ] 5. 레포 클론 → docker compose up --build -d (섹션 2-7)
+[ ] 6. curl https://yarr-api.simplyimg.com/health → ok 확인
+[ ] 7. wscat -c wss://yarr-api.simplyimg.com/ws/robot/state → WebSocket 확인
 ```
