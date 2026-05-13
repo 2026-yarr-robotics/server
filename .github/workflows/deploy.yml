@@ -1,6 +1,9 @@
 name: Deploy Server
 
 on:
+  push:
+    tags:
+      - 'release-*'
   workflow_dispatch:
     inputs:
       branch:
@@ -29,6 +32,7 @@ jobs:
           script: |
             set -e
             cd /home/eunwoosong/cup-stack/server
-            git pull origin ${{ inputs.branch }}
+            git fetch --all --tags
+            git checkout ${{ inputs.branch || github.ref_name }}
             docker compose up --build -d
-            echo "Deploy complete: $(date)"
+            echo "Deploy complete: $(date) @ ${{ inputs.branch || github.ref_name }}"
