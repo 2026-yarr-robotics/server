@@ -193,7 +193,7 @@ class RobotDomain:
             name=msg.get("name", []),
             position=msg.get("position", []),
             velocity=msg.get("velocity", []),
-            effort=msg.get("effort", []),
+            effort=[v if v is not None else 0.0 for v in msg.get("effort", [])],
         )
 
     async def start_task(
