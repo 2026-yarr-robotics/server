@@ -168,6 +168,13 @@ class RobotDomain:
                 float(tr["x"]), float(tr["y"]), float(tr["z"]),
             )
             self._tf_frames[child] = (parent, mat)
+        ee_mat = self._get_ee_matrix()
+        if ee_mat is not None:
+            self._ee_pos_ros = {
+                "x": float(ee_mat[0, 3]),
+                "y": float(ee_mat[1, 3]),
+                "z": float(ee_mat[2, 3]),
+            }
 
     def _on_camera_info(self, msg: dict[str, Any]) -> None:
         k = msg.get("k", [0.0] * 9)
