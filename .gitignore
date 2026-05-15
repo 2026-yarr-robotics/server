@@ -9,3 +9,4 @@ build/
 
 # Claude Code worktrees / local agent state
 .claude/
+bringup_real.local.sh
