@@ -322,7 +322,7 @@ class RobotDomain:
 
         try:
             result = await self._bridge.call_service(
-                "/motion/move_line",
+                "/dsr01/motion/move_line",
                 "dsr_msgs2/srv/MoveLine",
                 req,
                 timeout=30.0,
