@@ -6,9 +6,9 @@
 ROBOT_IP=${1:-192.168.1.100}
 
 source /opt/ros/humble/setup.bash
-source /home/ssu/ws_moveit/install/setup.bash
-source /home/ssu/ros2_ws/install/setup.bash
-source /home/ssu/install/setup.bash
+[[ -f "$HOME/ws_moveit/install/setup.bash" ]] && source "$HOME/ws_moveit/install/setup.bash"
+[[ -f "$HOME/ros2_ws/install/setup.bash" ]]   && source "$HOME/ros2_ws/install/setup.bash"
+[[ -f "$HOME/install/setup.bash" ]]            && source "$HOME/install/setup.bash"
 
 echo "[REAL] DSR M0609 MoveIt Bringup 시작 (mode=real, host=${ROBOT_IP})"
 
