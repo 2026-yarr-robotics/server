@@ -2,8 +2,10 @@
 set -e
 
 ROS_SETUP="/opt/ros/humble/setup.bash"
-CUP_STACK_SETUP="/home/ssu/development/cup-stack/install/setup.bash"
-ROS2_CUP_STACK_SETUP="/home/ssu/development/cup-stack/ros2-cup-stack/ros2/install/setup.bash"
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+CUP_STACK_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+CUP_STACK_SETUP="$CUP_STACK_ROOT/install/setup.bash"
+ROS2_CUP_STACK_SETUP="$CUP_STACK_ROOT/ros2-cup-stack/ros2/install/setup.bash"
 
 if [[ ! -f "$ROS_SETUP" ]]; then
     echo "ERROR: ROS 2 Humble not found at $ROS_SETUP" >&2

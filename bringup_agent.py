@@ -67,7 +67,7 @@ _task_statuses: dict[str, str] = {}  # idle | running | failed
 
 def _build_task_cmd(command: str, args: dict[str, str]) -> list[str]:
     install_setup = ROS2_WORKSPACE / "install" / "setup.bash"
-    doosan_setup = Path("/home/ssu/ros2_ws/install/setup.bash")
+    doosan_setup = Path.home() / "ros2_ws" / "install" / "setup.bash"
     ros_setup = "/opt/ros/humble/setup.bash"
     launch_args = " ".join(f"{k}:={v}" for k, v in args.items())
     ros_cmd = f"ros2 launch cup_stack {command}.launch.py {launch_args}".strip()
