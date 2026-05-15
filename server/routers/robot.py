@@ -119,7 +119,11 @@ async def get_task_log(name: str = "", tail: int = 50) -> dict:
 
 @router.get("/position", response_model=EEPositionSchema)
 async def get_ee_position() -> dict:
-    """Return last known end-effector position (last commanded position)."""
+    """Return the current end-effector position.
+
+    Prefers a fresh /ee_pose reading; falls back to the last commanded
+    target when /ee_pose is stale or has never been received.
+    """
     pos = _get_domain().get_ee_position()
     if pos is None:
         raise HTTPException(

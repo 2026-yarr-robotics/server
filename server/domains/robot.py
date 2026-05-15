@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,10 @@ from ..ros.bridge import RosBridge
 from ..ros.launch import BRINGUP_COMMANDS, LaunchManager, TaskStatus
 
 logger = logging.getLogger(__name__)
+
+# A /ee_pose reading older than this is treated as stale; we then fall back
+# to the last commanded position instead of reporting a frozen live pose.
+EE_POSE_STALE_SEC = 1.0
 
 
 @dataclass
@@ -65,6 +70,7 @@ class RobotDomain:
         self._subscribed = False
         self._commanded_pos: dict[str, float] | None = None
         self._ee_pos_ros: dict[str, float] | None = None
+        self._ee_pos_ros_ts: float | None = None
         self._config_dir = config_dir
         self._camera_info_topic = camera_info_topic
         self._depth_topic = depth_topic
@@ -148,12 +154,13 @@ class RobotDomain:
 
     def _on_ee_pose(self, msg: dict[str, Any]) -> None:
         pos = msg.get("pose", {}).get("position", {})
-        if pos:
+        if pos and {"x", "y", "z"} <= pos.keys():
             self._ee_pos_ros = {
-                "x": float(pos.get("x", 0.0)),
-                "y": float(pos.get("y", 0.0)),
-                "z": float(pos.get("z", 0.0)),
+                "x": float(pos["x"]),
+                "y": float(pos["y"]),
+                "z": float(pos["z"]),
             }
+            self._ee_pos_ros_ts = time.monotonic()
 
     def _on_tf(self, msg: dict[str, Any]) -> None:
         for t in msg.get("transforms", []):
@@ -212,19 +219,38 @@ class RobotDomain:
         await self._launcher.stop(name)
         return {"name": name, "status": "stopped"}
 
+    def _current_ee_position(self) -> dict[str, float] | None:
+        """Live /ee_pose if fresh, otherwise the last commanded position.
+
+        A frozen /ee_pose (bringup stopped, rosbridge dropped) must not be
+        reported as the current pose, so a stale reading falls back to the
+        last commanded target.
+        """
+        ts = self._ee_pos_ros_ts
+        if (
+            self._ee_pos_ros is not None
+            and ts is not None
+            and (time.monotonic() - ts) <= EE_POSE_STALE_SEC
+        ):
+            return self._ee_pos_ros
+        return self._commanded_pos
+
     def get_ee_position(self) -> dict[str, float] | None:
-        return self._ee_pos_ros if self._ee_pos_ros is not None else self._commanded_pos
+        return self._current_ee_position()
 
     def get_status(self) -> dict[str, Any]:
         s = self.status
+        # Snapshot once: _on_joint_state (rosbridge thread) may swap
+        # s.joints between field reads, mixing fields across messages.
+        j = s.joints
         bringup = self._launcher.bringup_task
-        ee_pos = self._ee_pos_ros if self._ee_pos_ros is not None else self._commanded_pos
+        ee_pos = self._current_ee_position()
         return {
             "joints": {
-                "name": s.joints.name,
-                "position": s.joints.position,
-                "velocity": s.joints.velocity,
-                "effort": s.joints.effort,
+                "name": j.name,
+                "position": j.position,
+                "velocity": j.velocity,
+                "effort": j.effort,
             },
             "task": {
                 "name": s.task_name,
