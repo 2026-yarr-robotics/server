@@ -35,10 +35,9 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 
 echo "[INFO] tmux 세션 '$SESSION' 시작..."
-tmux new-session -d -s "$SESSION" -x 220 -y 50
+tmux new-session -d -s "$SESSION" -x 220 -y 50 -n "rosbridge"
 
-# ── 창 0: rosbridge ───────────────────────────────────────
-tmux rename-window -t "$SESSION:0" "rosbridge"
+# ── 창 rosbridge ──────────────────────────────────────────
 tmux send-keys -t "$SESSION:rosbridge" \
     "bash $SCRIPT_DIR/rosbridge.sh" Enter
 
@@ -67,9 +66,9 @@ echo " 컵 스태킹 로봇 시스템 시작 완료"
 echo "======================================================"
 echo " 세션 연결:   tmux attach -t $SESSION"
 echo " 창 전환:     Ctrl+b → 숫자"
-echo "   0 = rosbridge   1 = camera"
-echo "   2 = bringup-agent (port 8099)"
-echo "   3 = server (Docker)"
+echo "   1 = rosbridge   2 = camera"
+echo "   3 = bringup-agent (port 8099)"
+echo "   4 = server (Docker)"
 echo " 세션 종료:   tmux kill-session -t $SESSION"
 echo ""
 echo " 대시보드:    https://yarr.simplyimg.com"
