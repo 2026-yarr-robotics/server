@@ -213,12 +213,15 @@ class RobotDomain:
         return {"name": name, "status": "stopped"}
 
     def get_ee_position(self) -> dict[str, float] | None:
-        return self._ee_pos_ros if self._ee_pos_ros is not None else self._commanded_pos
+        # Report only the measured /ee_pose. No fallback to the last
+        # commanded target: a commanded goal is not the actual EE pose,
+        # so when /ee_pose is unavailable we return None.
+        return self._ee_pos_ros
 
     def get_status(self) -> dict[str, Any]:
         s = self.status
         bringup = self._launcher.bringup_task
-        ee_pos = self._ee_pos_ros if self._ee_pos_ros is not None else self._commanded_pos
+        ee_pos = self._ee_pos_ros  # measured /ee_pose only; no commanded fallback
         return {
             "joints": {
                 "name": s.joints.name,

@@ -60,10 +60,15 @@ services:
 
   cloudflared:
     image: cloudflare/cloudflared:latest
-    command: tunnel --config /etc/cloudflared/config.yml run
-    volumes:
-      - ~/.cloudflared/4ffcfc13-173e-468f-8623-cab1fa0813c5.json:/etc/cloudflared/4ffcfc13-173e-468f-8623-cab1fa0813c5.json:ro
-      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+    # Dashboard-managed (Zero Trust) tunnel: token comes from server/.env
+    # (CF_TUNNEL_TOKEN); ingress is configured in the Cloudflare dashboard
+    # (Tunnels -> Public Hostname -> yarr-api.simplyimg.com -> http://nginx:80).
+    command: tunnel --no-autoupdate --protocol http2 run
+    environment:
+      # Put the token in server/.env (gitignored): CF_TUNNEL_TOKEN=eyJ...
+      # Empty default keeps `docker compose` usable for the rest of the
+      # stack; cloudflared will log a clear error if the token is unset.
+      - TUNNEL_TOKEN=${CF_TUNNEL_TOKEN:-}
     depends_on:
       - nginx
     networks:

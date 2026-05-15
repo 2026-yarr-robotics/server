@@ -92,6 +92,19 @@ def create_app() -> FastAPI:
         title="cup_stack Robot Service",
         version="0.1.0",
         lifespan=lifespan,
+        description=(
+            "Doosan M0609 컵 스태킹 로봇 제어 (robot 서비스).\n\n"
+            "### WebSocket 엔드포인트\n"
+            "OpenAPI/Swagger는 WebSocket을 표기하지 않습니다. 이 서비스의 소켓:\n\n"
+            "- `ws://<host>/ws/robot/state` — 로봇 상태 스트림. 페이로드는 "
+            "`GET /api/robot/status`와 동일(`RobotStatusResponse`), 약 100ms"
+            "(10Hz) 주기 push.\n"
+            "- `ws://<host>/ws/task/log` — 실행 태스크 로그 증분 스트림 "
+            "(`{task, status, log[]}`), 약 500ms 주기.\n"
+            "- `ws://<host>/ws/cups` — 컵 감지 프레임 스트림 "
+            "(`CupDetectionFrame`), 약 100ms 주기.\n\n"
+            "프로덕션은 `wss://<도메인>/ws/robot/state` 처럼 nginx/터널 경유.\n"
+        ),
         # Serve docs under the /api/robot prefix so nginx's existing
         # `location /api/robot/` block proxies them to this service.
         docs_url="/api/robot/docs",

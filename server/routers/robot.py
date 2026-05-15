@@ -119,12 +119,16 @@ async def get_task_log(name: str = "", tail: int = 50) -> dict:
 
 @router.get("/position", response_model=EEPositionSchema)
 async def get_ee_position() -> dict:
-    """Return last known end-effector position (last commanded position)."""
+    """Return the current end-effector position from the robot's /ee_pose.
+
+    No fallback to the last commanded target: if /ee_pose has not been
+    received the position is reported as unavailable (404).
+    """
     pos = _get_domain().get_ee_position()
     if pos is None:
         raise HTTPException(
             status_code=404,
-            detail="Position not yet known — issue a move command first",
+            detail="End-effector pose unavailable — /ee_pose not received (is bringup running?)",
         )
     return pos
 

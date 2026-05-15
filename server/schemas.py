@@ -1,10 +1,19 @@
-"""Pydantic request/response schemas for all API endpoints."""
+"""Pydantic request/response schemas for all API endpoints.
+
+Every model carries a ``model_config["json_schema_extra"]["example"]`` so
+the OpenAPI schema (and the Swagger UI "Example Value") shows a realistic
+sample payload for each request and response.
+"""
 
 from __future__ import annotations
 
 from typing import Optional
 
 from pydantic import BaseModel, Field
+
+
+def _example(value: dict) -> dict:
+    return {"json_schema_extra": {"example": value}}
 
 
 # ── Robot ─────────────────────────────────────────────────────────────────────
@@ -15,10 +24,19 @@ class JointStateSchema(BaseModel):
     velocity: list[float] = Field(default=[], description="라디안/s")
     effort: list[float] = Field(default=[], description="N·m")
 
+    model_config = _example({
+        "name": ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
+        "position": [0.0, -0.262, 1.571, 0.0, 1.047, 0.0],
+        "velocity": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+        "effort": [0.12, 1.84, 0.95, 0.05, 0.21, 0.0],
+    })
+
 
 class ActiveTaskSchema(BaseModel):
     name: Optional[str] = None
     status: str = "idle"
+
+    model_config = _example({"name": "cup_pyramid_web", "status": "running"})
 
 
 class TaskSummarySchema(BaseModel):
@@ -27,11 +45,20 @@ class TaskSummarySchema(BaseModel):
     status: str
     pid: Optional[int] = Field(None, description="프로세스 종료 시 null")
 
+    model_config = _example({
+        "name": "cup_pyramid_web",
+        "command": "ros2 launch cup_stack cup_pyramid_web.launch.py",
+        "status": "running",
+        "pid": 12345,
+    })
+
 
 class EEPositionSchema(BaseModel):
     x: float = Field(..., description="base_link X (m)")
     y: float = Field(..., description="base_link Y (m)")
     z: float = Field(..., description="base_link Z (m)")
+
+    model_config = _example({"x": 0.45, "y": -0.12, "z": 0.30})
 
 
 class RobotStatusResponse(BaseModel):
@@ -40,6 +67,24 @@ class RobotStatusResponse(BaseModel):
     bringup: ActiveTaskSchema
     tasks: list[TaskSummarySchema]
     ee_position: Optional[EEPositionSchema] = None
+
+    model_config = _example({
+        "joints": {
+            "name": ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"],
+            "position": [0.0, -0.262, 1.571, 0.0, 1.047, 0.0],
+            "velocity": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            "effort": [0.12, 1.84, 0.95, 0.05, 0.21, 0.0],
+        },
+        "task": {"name": "cup_pyramid_web", "status": "running"},
+        "bringup": {"name": "bringup_sim", "status": "running"},
+        "tasks": [{
+            "name": "cup_pyramid_web",
+            "command": "ros2 launch cup_stack cup_pyramid_web.launch.py",
+            "status": "running",
+            "pid": 12345,
+        }],
+        "ee_position": {"x": 0.45, "y": -0.12, "z": 0.30},
+    })
 
 
 class WorkspaceLimitsResponse(BaseModel):
@@ -51,10 +96,19 @@ class WorkspaceLimitsResponse(BaseModel):
     z_max: float
     grid_spacing: float
 
+    model_config = _example({
+        "x_min": 0.20, "x_max": 0.65,
+        "y_min": -0.35, "y_max": 0.35,
+        "z_min": 0.05, "z_max": 0.50,
+        "grid_spacing": 0.05,
+    })
+
 
 class BringupRequest(BaseModel):
     mode: str = Field("sim", description="`real`이면 `ip` 필드 필요")
     ip: str = Field("192.168.1.100", description="`mode=real`일 때 로봇 컨트롤러 IP")
+
+    model_config = _example({"mode": "sim", "ip": "192.168.1.100"})
 
 
 class TaskStartRequest(BaseModel):
@@ -64,9 +118,13 @@ class TaskStartRequest(BaseModel):
         description="launch 파일에 전달할 인자 (key:=value 형식으로 변환됨)",
     )
 
+    model_config = _example({"task": "cup_pyramid_web", "args": {}})
+
 
 class TaskStopRequest(BaseModel):
     name: str = Field(..., description="중지할 태스크 이름")
+
+    model_config = _example({"name": "cup_pyramid_web"})
 
 
 class TaskStartedResponse(BaseModel):
@@ -74,24 +132,43 @@ class TaskStartedResponse(BaseModel):
     status: str
     pid: Optional[int] = None
 
+    model_config = _example({
+        "name": "cup_pyramid_web", "status": "running", "pid": 12345,
+    })
+
 
 class TaskStoppedResponse(BaseModel):
     name: str
     status: str
+
+    model_config = _example({"name": "cup_pyramid_web", "status": "stopped"})
 
 
 class TaskLogResponse(BaseModel):
     name: str
     log: list[str]
 
+    model_config = _example({
+        "name": "cup_pyramid_web",
+        "log": [
+            "[INFO] [launch]: process started",
+            "[INFO] [cup_pyramid]: picking cup_0",
+            "[INFO] [cup_pyramid]: placed cup_0",
+        ],
+    })
+
 
 class GripperRequest(BaseModel):
     command: str = Field(..., description="`open` 또는 `close`")
+
+    model_config = _example({"command": "close"})
 
 
 class GripperResponse(BaseModel):
     success: bool
     message: str
+
+    model_config = _example({"success": True, "message": "gripper closed"})
 
 
 class MoveRequest(BaseModel):
@@ -100,11 +177,21 @@ class MoveRequest(BaseModel):
     z: float = Field(..., description="base_link Z (m)")
     mode: str = Field("absolute", description="`absolute` 또는 `relative`")
 
+    model_config = _example({
+        "x": 0.45, "y": -0.12, "z": 0.30, "mode": "absolute",
+    })
+
 
 class MoveResponse(BaseModel):
     success: bool
     message: str
     position: Optional[EEPositionSchema] = None
+
+    model_config = _example({
+        "success": True,
+        "message": "move completed",
+        "position": {"x": 0.45, "y": -0.12, "z": 0.30},
+    })
 
 
 # ── Cup Detection ─────────────────────────────────────────────────────────────
@@ -113,12 +200,18 @@ class PixelPoint(BaseModel):
     x: float = Field(..., description="픽셀 X")
     y: float = Field(..., description="픽셀 Y")
 
+    model_config = _example({"x": 320.5, "y": 240.0})
+
 
 class BoundingBox(BaseModel):
     x_min: float
     y_min: float
     x_max: float
     y_max: float
+
+    model_config = _example({
+        "x_min": 300.0, "y_min": 220.0, "x_max": 341.0, "y_max": 270.0,
+    })
 
 
 class CupInfo(BaseModel):
@@ -129,6 +222,15 @@ class CupInfo(BaseModel):
     pixel: PixelPoint = Field(..., description="bbox 중심 픽셀 좌표")
     bbox: BoundingBox = Field(..., description="픽셀 단위 bbox")
 
+    model_config = _example({
+        "id": "cup_0",
+        "label": "cup",
+        "confidence": 0.94,
+        "position": {"x": 0.45, "y": -0.12, "z": 0.05},
+        "pixel": {"x": 320.5, "y": 240.0},
+        "bbox": {"x_min": 300.0, "y_min": 220.0, "x_max": 341.0, "y_max": 270.0},
+    })
+
 
 class CupDetectionFrame(BaseModel):
     stamp: float = Field(..., description="UNIX 타임스탬프 (초)")
@@ -136,10 +238,26 @@ class CupDetectionFrame(BaseModel):
     count: int = Field(..., description="감지된 컵 수")
     cups: list[CupInfo] = Field(default=[], description="감지된 컵 목록")
 
+    model_config = _example({
+        "stamp": 1747291383.512,
+        "frame_id": "base_link",
+        "count": 1,
+        "cups": [{
+            "id": "cup_0",
+            "label": "cup",
+            "confidence": 0.94,
+            "position": {"x": 0.45, "y": -0.12, "z": 0.05},
+            "pixel": {"x": 320.5, "y": 240.0},
+            "bbox": {"x_min": 300.0, "y_min": 220.0, "x_max": 341.0, "y_max": 270.0},
+        }],
+    })
+
 
 class CupTriggerRequest(BaseModel):
     cup_id: str = Field(..., description="감지 결과의 cups[].id 값")
     task: str = Field(..., description="cup_pyramid_web 또는 cup_unstack_web")
+
+    model_config = _example({"cup_id": "cup_0", "task": "cup_pyramid_web"})
 
 
 # ── Calibration ───────────────────────────────────────────────────────────────
@@ -149,9 +267,29 @@ class CalibrationResponse(BaseModel):
     matrix: list[list[float]] = Field(..., description="4×4 동차 변환 행렬 (mm 단위)")
     shape: list[int] = Field(..., description="행렬 차원")
 
+    model_config = _example({
+        "file": "handeye_handineye.npy",
+        "matrix": [
+            [1.0, 0.0, 0.0, 30.5],
+            [0.0, 1.0, 0.0, -12.0],
+            [0.0, 0.0, 1.0, 415.2],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+        "shape": [4, 4],
+    })
+
 
 class CalibrationUpdateRequest(BaseModel):
     matrix: list[list[float]] = Field(..., description="4×4 동차 변환 행렬 (mm 단위)")
+
+    model_config = _example({
+        "matrix": [
+            [1.0, 0.0, 0.0, 30.5],
+            [0.0, 1.0, 0.0, -12.0],
+            [0.0, 0.0, 1.0, 415.2],
+            [0.0, 0.0, 0.0, 1.0],
+        ],
+    })
 
 
 # ── Pixel → World ──────────────────────────────────────────────────────────────
@@ -163,3 +301,9 @@ class PixelToWorldResponse(BaseModel):
     depth_mm: int = Field(..., description="픽셀 깊이 (mm)")
     pixel_x: int
     pixel_y: int
+
+    model_config = _example({
+        "x": 0.45, "y": -0.12, "z": 0.05,
+        "depth_mm": 512,
+        "pixel_x": 320, "pixel_y": 240,
+    })

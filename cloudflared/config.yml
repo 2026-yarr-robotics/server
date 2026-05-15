@@ -1,6 +1,11 @@
 tunnel: 4ffcfc13-173e-468f-8623-cab1fa0813c5
 credentials-file: /etc/cloudflared/4ffcfc13-173e-468f-8623-cab1fa0813c5.json
 
+# Use HTTP/2 transport instead of QUIC: the host UDP buffers
+# (net.core.rmem_max ~208KiB) are far below quic-go's ~7MiB need,
+# causing repeated "control stream encountered a failure" QUIC drops.
+protocol: http2
+
 ingress:
   - hostname: yarr-api.simplyimg.com
     service: http://nginx:80

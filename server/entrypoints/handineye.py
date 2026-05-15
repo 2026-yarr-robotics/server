@@ -90,6 +90,13 @@ def create_app() -> FastAPI:
         title="cup_stack Hand-in-Eye Service",
         version="0.1.0",
         lifespan=lifespan,
+        description=(
+            "Hand-in-Eye 카메라/캘리브레이션 서비스.\n\n"
+            "### WebSocket 엔드포인트\n"
+            "OpenAPI/Swagger는 WebSocket을 표기하지 않습니다. 이 서비스의 소켓:\n\n"
+            "- `ws://<host>/ws/camera/handineye` — 카메라 프레임 스트림 "
+            "(바이너리 JPEG, 프레임 도착 시 push).\n"
+        ),
         # Serve docs under the /api/handineye prefix so nginx's existing
         # `location /api/handineye/` block proxies them to this service.
         docs_url="/api/handineye/docs",
