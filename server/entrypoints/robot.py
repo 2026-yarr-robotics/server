@@ -43,31 +43,48 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         global _domain, _launcher, _cup_domain
 
-        bridge = await connect_bridge(settings.rosbridge)
         _launcher = LaunchManager(
             settings.workspace,
             agent_url=os.getenv("BRINGUP_AGENT_URL"),
         )
-        _domain = RobotDomain(
-            bridge,
-            _launcher,
-            settings.robot.joint_states,
-            config_dir=settings.workspace.config_dir,
-            camera_info_topic=settings.cameras.handineye_info,
-            depth_topic=settings.cameras.handineye_depth,
-        )
-        _domain.subscribe()
-        set_robot_domain(_domain)
 
-        _cup_domain = CupDetectionDomain(bridge, _launcher)
-        _cup_domain.subscribe()
-        set_cup_detection_domain(_cup_domain)
+        try:
+            bridge = await connect_bridge(settings.rosbridge)
+        except Exception:
+            logger.warning(
+                "rosbridge unavailable at %s:%d; starting without ROS. "
+                "Docs/OpenAPI are served; ROS-backed endpoints return 503 "
+                "until the service is restarted with rosbridge up.",
+                settings.rosbridge.host,
+                settings.rosbridge.port,
+                exc_info=True,
+            )
+            bridge = None
+
+        if bridge is not None:
+            _domain = RobotDomain(
+                bridge,
+                _launcher,
+                settings.robot.joint_states,
+                config_dir=settings.workspace.config_dir,
+                camera_info_topic=settings.cameras.handineye_info,
+                depth_topic=settings.cameras.handineye_depth,
+            )
+            _domain.subscribe()
+            set_robot_domain(_domain)
+
+            _cup_domain = CupDetectionDomain(bridge, _launcher)
+            _cup_domain.subscribe()
+            set_cup_detection_domain(_cup_domain)
 
         logger.info("robot service started on port %d", settings.ports.robot)
         yield
 
         await _launcher.shutdown_all()
-        await disconnect_bridge()
+        try:
+            await disconnect_bridge()
+        except Exception:
+            logger.warning("error during rosbridge disconnect", exc_info=True)
         RosBridge.reset()
         logger.info("robot service stopped")
 

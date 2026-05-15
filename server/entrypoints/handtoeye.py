@@ -42,31 +42,47 @@ def create_app() -> FastAPI:
     async def lifespan(app: FastAPI):
         global _domain, _camera
 
-        bridge = await connect_bridge(settings.rosbridge)
-        calib_store = CalibrationStore(settings.workspace.config_dir)
-        _domain = HandToEyeDomain(
-            bridge,
-            calib_store,
-            settings.cameras.handtoeye_info,
-            settings.cameras.handtoeye_color,
-        )
-        set_handtoeye_domain(_domain)
+        try:
+            bridge = await connect_bridge(settings.rosbridge)
+        except Exception:
+            logger.warning(
+                "rosbridge unavailable at %s:%d; starting without ROS. "
+                "Docs/OpenAPI are served; ROS-backed endpoints return 503 "
+                "until the service is restarted with rosbridge up.",
+                settings.rosbridge.host,
+                settings.rosbridge.port,
+                exc_info=True,
+            )
+            bridge = None
 
-        bridge.subscribe(
-            settings.cameras.handtoeye_info,
-            "sensor_msgs/msg/CameraInfo",
-            _domain.on_camera_info,
-        )
+        if bridge is not None:
+            calib_store = CalibrationStore(settings.workspace.config_dir)
+            _domain = HandToEyeDomain(
+                bridge,
+                calib_store,
+                settings.cameras.handtoeye_info,
+                settings.cameras.handtoeye_color,
+            )
+            set_handtoeye_domain(_domain)
 
-        _camera = CameraStream(bridge, settings.cameras.handtoeye_color)
-        _camera.subscribe()
+            bridge.subscribe(
+                settings.cameras.handtoeye_info,
+                "sensor_msgs/msg/CameraInfo",
+                _domain.on_camera_info,
+            )
+
+            _camera = CameraStream(bridge, settings.cameras.handtoeye_color)
+            _camera.subscribe()
 
         logger.info(
             "handtoeye service started on port %d", settings.ports.handtoeye,
         )
         yield
 
-        await disconnect_bridge()
+        try:
+            await disconnect_bridge()
+        except Exception:
+            logger.warning("error during rosbridge disconnect", exc_info=True)
         RosBridge.reset()
         logger.info("handtoeye service stopped")
 
