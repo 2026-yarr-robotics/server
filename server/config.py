@@ -60,7 +60,7 @@ class CameraTopics:
 
 @dataclass(frozen=True)
 class RobotTopics:
-    joint_states: str = "/joint_states"
+    joint_states: str = "/dsr01/joint_states"
 
 
 @dataclass(frozen=True)
