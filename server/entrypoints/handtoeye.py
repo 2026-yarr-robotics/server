@@ -74,6 +74,11 @@ def create_app() -> FastAPI:
         title="cup_stack Hand-to-Eye Service",
         version="0.1.0",
         lifespan=lifespan,
+        # Serve docs under the /api/handtoeye prefix so nginx's existing
+        # `location /api/handtoeye/` block proxies them to this service.
+        docs_url="/api/handtoeye/docs",
+        redoc_url="/api/handtoeye/redoc",
+        openapi_url="/api/handtoeye/openapi.json",
     )
 
     app.add_middleware(

@@ -75,6 +75,11 @@ def create_app() -> FastAPI:
         title="cup_stack Robot Service",
         version="0.1.0",
         lifespan=lifespan,
+        # Serve docs under the /api/robot prefix so nginx's existing
+        # `location /api/robot/` block proxies them to this service.
+        docs_url="/api/robot/docs",
+        redoc_url="/api/robot/redoc",
+        openapi_url="/api/robot/openapi.json",
     )
 
     app.add_middleware(
