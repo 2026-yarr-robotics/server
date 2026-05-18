@@ -435,33 +435,33 @@ class RobotDomain:
         self,
         x: float,
         y: float,
-        cup_bottom_z: float | None = None,
+        cup_top_z: float | None = None,
         z: float | None = None,
         ori: dict[str, float] | None = None,
     ) -> dict[str, Any]:
         """Proxy a single-cup pick to the ROS 2 skill_api_node.
 
-        Coordinates are the **cup bottom centre** (base_link, m).  When
-        ``cup_bottom_z`` is given the skill node converts it to the
-        gripper Z via ``cup_bottom_z + cup_grip_z_offset``; pass ``z``
+        Coordinates are the **cup top centre** (base_link, m).  When
+        ``cup_top_z`` is given the skill node converts it to the
+        gripper Z via ``cup_top_z + cup_grip_z_offset``; pass ``z``
         instead to command a raw gripper Z directly.
 
         Raises:
-            ValueError: neither ``cup_bottom_z`` nor ``z`` supplied.
+            ValueError: neither ``cup_top_z`` nor ``z`` supplied.
             ConnectionError: skill_api_node unreachable.
             RuntimeError: skill node returned an HTTP error
                 (message is ``"<status>: <body>"``).
         """
-        if cup_bottom_z is None and z is None:
+        if cup_top_z is None and z is None:
             raise ValueError(
-                "provide 'cup_bottom_z' (cup bottom centre Z) or 'z' (gripper Z)"
+                "provide 'cup_top_z' (cup top centre Z) or 'z' (gripper Z)"
             )
 
         payload: dict[str, Any] = {"x": x, "y": y}
         if z is not None:
             payload["z"] = z
-        if cup_bottom_z is not None:
-            payload["cup_bottom_z"] = cup_bottom_z
+        if cup_top_z is not None:
+            payload["cup_top_z"] = cup_top_z
         if ori is not None:
             payload["ori"] = ori
 

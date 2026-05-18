@@ -297,24 +297,24 @@ class CalibrationUpdateRequest(BaseModel):
 class PickSkillRequest(BaseModel):
     """Body for POST /api/robot/skill/pick.
 
-    좌표는 **컵 바닥 중앙** 기준(base_link, m). ``cup_bottom_z``를 주면
-    skill_api_node가 ``gripper_z = cup_bottom_z + cup_grip_z_offset``로
+    좌표는 **컵 윗면 중앙** 기준(base_link, m). ``cup_top_z``를 주면
+    skill_api_node가 ``gripper_z = cup_top_z + cup_grip_z_offset``로
     변환한다. ``z``(그리퍼 raw Z)를 직접 줄 수도 있으며, 둘 중 하나는 필수.
     """
 
-    x: float = Field(..., description="컵 바닥 중앙 X (base_link, m)")
-    y: float = Field(..., description="컵 바닥 중앙 Y (base_link, m)")
-    cup_bottom_z: Optional[float] = Field(
-        None, description="컵 바닥 중앙 Z (m). 서버에서 grip offset 가산"
+    x: float = Field(..., description="컵 윗면 중앙 X (base_link, m)")
+    y: float = Field(..., description="컵 윗면 중앙 Y (base_link, m)")
+    cup_top_z: Optional[float] = Field(
+        None, description="컵 윗면 중앙 Z (m). 서버에서 grip offset 가산"
     )
     z: Optional[float] = Field(
-        None, description="그리퍼 raw Z (m). cup_bottom_z 대신 직접 지정 시"
+        None, description="그리퍼 raw Z (m). cup_top_z 대신 직접 지정 시"
     )
     ori: Optional[dict] = Field(
         None, description="그리퍼 방향 quaternion {x,y,z,w}; 미지정 시 down"
     )
 
-    model_config = _example({"x": 0.45, "y": -0.12, "cup_bottom_z": 0.05})
+    model_config = _example({"x": 0.45, "y": -0.12, "cup_top_z": 0.05})
 
 
 class PickSkillResponse(BaseModel):

@@ -174,17 +174,17 @@ async def pixel_to_world(px: int, py: int) -> dict:
 
 @router.post("/skill/pick", response_model=PickSkillResponse)
 async def skill_pick(body: PickSkillRequest) -> dict:
-    """Pick one cup at the given **cup bottom centre** coordinate.
+    """Pick one cup at the given **cup top centre** coordinate.
 
     Proxies to the ROS 2 skill_api_node (PickCupSkill). Supply
-    ``cup_bottom_z`` (converted to gripper Z server-side) or ``z``.
+    ``cup_top_z`` (converted to gripper Z server-side) or ``z``.
     """
     domain = _get_domain()
     try:
         return await domain.pick_skill(
             body.x,
             body.y,
-            cup_bottom_z=body.cup_bottom_z,
+            cup_top_z=body.cup_top_z,
             z=body.z,
             ori=body.ori,
         )
