@@ -448,7 +448,8 @@ class LaunchManager:
 
         if command == "bringup_real":
             ip = args.get("ip", "192.168.1.100")
-            script = self._workspace.cup_stack_dir / self._workspace.bringup_real_script
+            # Real bringup runs ONLY via the canonical server-side script.
+            script = self._workspace.server_dir / self._workspace.bringup_real_script
             return f"{script} {ip}"
 
         pkg = self._workspace.launch_package

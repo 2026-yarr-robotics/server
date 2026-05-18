@@ -190,7 +190,9 @@ class _Handler(BaseHTTPRequestHandler):
                     script = CUP_STACK_DIR / "bringup_sim.sh"
                     cmd = ["bash", str(script)]
                 else:
-                    script = CUP_STACK_DIR / "bringup_real.sh"
+                    # Real bringup runs ONLY via the canonical server-side
+                    # script (server/bringup_real.sh), never the ROS 2 copy.
+                    script = _SCRIPT_DIR / "bringup_real.sh"
                     cmd = ["bash", str(script), ip]
 
                 _log_lines = []

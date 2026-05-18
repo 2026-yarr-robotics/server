@@ -9,6 +9,11 @@ def _default_workspace() -> Path:
     return Path(__file__).resolve().parents[2] / "cup_stack" / "ros2"
 
 
+def _server_dir() -> Path:
+    """Server repo dir holding the canonical bringup scripts."""
+    return Path(__file__).resolve().parents[1]
+
+
 @dataclass(frozen=True)
 class ServerConfig:
     host: str = "0.0.0.0"
@@ -59,6 +64,11 @@ class WorkspaceConfig:
     @property
     def config_dir(self) -> Path:
         return self.cup_stack_dir / "config"
+
+    @property
+    def server_dir(self) -> Path:
+        """Dir holding the canonical bringup scripts (server repo root)."""
+        return _server_dir()
 
 
 @dataclass(frozen=True)
