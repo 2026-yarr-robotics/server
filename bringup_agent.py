@@ -20,6 +20,7 @@ import signal
 import socketserver
 import subprocess
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from typing import Any
@@ -218,7 +219,13 @@ class _Handler(BaseHTTPRequestHandler):
                 _kill_proc(proc)
                 logger.info("bringup stopped (rc=%s)", proc.poll())
 
+            # Also stop bringup NOT started by this agent (started
+            # externally, or before an agent restart) and reap orphan
+            # nodes so a subsequent /start works.
+            _force_stop_bringup()
+
             with _lock:
+                _proc = None
                 _status = "idle"
             self._json({"status": "stopped"})
 
@@ -260,6 +267,43 @@ def _kill_proc(proc: subprocess.Popen, timeout_sigint: float = 10.0) -> None:
         proc.wait(timeout=5)
     except subprocess.TimeoutExpired:
         pass
+
+
+_DSR01_ORPHANS = (
+    r"ros2_control_node.*__ns:=/dsr01",
+    r"robot_state_publisher.*__ns:=/dsr01",
+    r"controller_manager/spawner.*__ns:=/dsr01",
+    r"rviz2 .*__ns:=/dsr01",
+)
+
+
+def _pkill(pattern: str, sig: str) -> None:
+    subprocess.run(
+        ["pkill", sig, "-f", pattern],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+
+
+def _force_stop_bringup() -> None:
+    """Stop bringup regardless of who started it.
+
+    Mirrors stop.sh's bringup-kill block (SIGINT→SIGKILL on
+    ``dsr_bringup2``) and additionally reaps the orphaned ``/dsr01``
+    child nodes a launch-wrapper kill leaves behind — otherwise a
+    subsequent /start has multiple controller_manager instances
+    contending for the single Doosan DRFL session and /dsr01/motion/*
+    calls hang.
+    """
+    _pkill("dsr_bringup2", "-INT")
+    time.sleep(2)
+    _pkill("dsr_bringup2", "-KILL")
+    for pat in _DSR01_ORPHANS:
+        _pkill(pat, "-INT")
+    time.sleep(1)
+    _pkill(r"ros2_control_node.*__ns:=/dsr01", "-KILL")
+    _pkill(r"robot_state_publisher.*__ns:=/dsr01", "-KILL")
 
 
 def main() -> None:

@@ -333,21 +333,29 @@ class LaunchManager:
 
     async def _stop_bringup(self, name: str) -> None:
         task = self._bringup
-        if task is None or task.name != name:
-            raise KeyError(f"No bringup task named '{name}'")
+        if task is not None and task.name == name:
+            task.status = TaskStatus.STOPPING
 
-        task.status = TaskStatus.STOPPING
+            if self._agent_url and task.process is None:
+                await self._stop_via_agent()
+            elif task.process is not None:
+                await self._stop_local(task)
 
-        if self._agent_url and task.process is None:
+            task.status = TaskStatus.IDLE
+            fut = self._log_futures.pop(name, None)
+            if fut:
+                fut.cancel()
+            logger.info("Stopped bringup '%s'", name)
+            return
+
+        # Not tracked here — bringup was started outside the dashboard,
+        # or this server restarted and lost the handle. Ask the agent to
+        # force-stop it by process pattern so it is still stoppable.
+        if self._agent_url:
             await self._stop_via_agent()
-        elif task.process is not None:
-            await self._stop_local(task)
-
-        task.status = TaskStatus.IDLE
-        fut = self._log_futures.pop(name, None)
-        if fut:
-            fut.cancel()
-        logger.info("Stopped bringup '%s'", name)
+            logger.info("Force-stopped untracked bringup '%s' via agent", name)
+        else:
+            logger.info("No tracked bringup '%s'; nothing to stop", name)
 
     async def _stop_local(self, task: RunningTask) -> None:
         task.status = TaskStatus.STOPPING
