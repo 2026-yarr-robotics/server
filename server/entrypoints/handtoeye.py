@@ -60,18 +60,18 @@ def create_app() -> FastAPI:
             _domain = HandToEyeDomain(
                 bridge,
                 calib_store,
-                settings.cameras.handtoeye_info,
-                settings.cameras.handtoeye_color,
+                settings.cameras.exo_info,
+                settings.cameras.exo_color,
             )
             set_handtoeye_domain(_domain)
 
             bridge.subscribe(
-                settings.cameras.handtoeye_info,
+                settings.cameras.exo_info,
                 "sensor_msgs/msg/CameraInfo",
                 _domain.on_camera_info,
             )
 
-            _camera = CameraStream(bridge, settings.cameras.handtoeye_color)
+            _camera = CameraStream(bridge, settings.cameras.exo_color)
             _camera.subscribe()
 
         logger.info(
@@ -94,7 +94,7 @@ def create_app() -> FastAPI:
             "Hand-to-Eye 카메라/캘리브레이션 서비스.\n\n"
             "### WebSocket 엔드포인트\n"
             "OpenAPI/Swagger는 WebSocket을 표기하지 않습니다. 이 서비스의 소켓:\n\n"
-            "- `ws://<host>/ws/camera/handtoeye` — 카메라 프레임 스트림 "
+            "- `ws://<host>/ws/camera/exo` — eye-to-hand 카메라 프레임 스트림 "
             "(바이너리 JPEG, 프레임 도착 시 push).\n"
         ),
         # Serve docs under the /api/handtoeye prefix so nginx's existing
@@ -114,7 +114,7 @@ def create_app() -> FastAPI:
 
     app.include_router(handtoeye_router)
 
-    @app.websocket("/ws/camera/handtoeye")
+    @app.websocket("/ws/camera/exo")
     async def ws_camera(ws: WebSocket) -> None:
         await ws.accept()
         if _camera is None:

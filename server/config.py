@@ -27,6 +27,21 @@ class RosBridgeConfig:
 
 
 @dataclass(frozen=True)
+class SkillApiConfig:
+    """Location of the ROS 2 skill_api_node HTTP server (PickCupSkill).
+
+    Overridable via the ``SKILL_API_URL`` env var on the robot service.
+    """
+
+    host: str = "localhost"
+    port: int = 8765
+
+    @property
+    def url(self) -> str:
+        return f"http://{self.host}:{self.port}"
+
+
+@dataclass(frozen=True)
 class WorkspaceConfig:
     root: Path = field(default_factory=_default_workspace)
     launch_package: str = "cup_stack"
@@ -48,14 +63,26 @@ class WorkspaceConfig:
 
 @dataclass(frozen=True)
 class CameraTopics:
-    """Topic names for each camera source."""
+    """Topic names for each camera source.
 
-    handineye_info: str = "/camera/camera/color/camera_info"
-    handineye_color: str = "/camera/camera/color/image_raw/compressed"
-    handineye_depth: str = "/camera/camera/aligned_depth_to_color/image_raw"
-    handtoeye_info: str = "/camera/fixed_camera/color/camera_info"
-    handtoeye_color: str = "/camera/fixed_camera/color/image_raw/compressed"
-    handtoeye_depth: str = "/camera/fixed_camera/aligned_depth_to_color/image_raw"
+    Two RealSense cameras are launched under distinct namespaces by serial:
+
+    - ``exo``  = eye-to-hand  (fixed/external camera, serial 24232207744)
+                 → topics under ``/exo/exo/``
+    - ``hand`` = eye-in-hand  (EE-mounted camera, serial 140122076335)
+                 → topics under ``/hand/hand/``
+
+    ``*_color`` points at the ``/compressed`` image_transport sub-topic
+    because the WebSocket stream subscribes as ``CompressedImage`` and
+    passes JPEG frames straight through.
+    """
+
+    hand_info: str = "/hand/hand/color/camera_info"
+    hand_color: str = "/hand/hand/color/image_raw/compressed"
+    hand_depth: str = "/hand/hand/aligned_depth_to_color/image_raw"
+    exo_info: str = "/exo/exo/color/camera_info"
+    exo_color: str = "/exo/exo/color/image_raw/compressed"
+    exo_depth: str = "/exo/exo/aligned_depth_to_color/image_raw"
 
 
 @dataclass(frozen=True)
@@ -87,6 +114,7 @@ class ServicePorts:
 class AppSettings:
     server: ServerConfig = field(default_factory=ServerConfig)
     rosbridge: RosBridgeConfig = field(default_factory=RosBridgeConfig)
+    skill_api: SkillApiConfig = field(default_factory=SkillApiConfig)
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     cameras: CameraTopics = field(default_factory=CameraTopics)
     robot: RobotTopics = field(default_factory=RobotTopics)

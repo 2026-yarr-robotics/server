@@ -40,35 +40,37 @@ async def lifespan(app: FastAPI):
         bridge,
         launcher,
         settings.robot.joint_states,
+        skill_api_url=settings.skill_api.url,
     )
     robot_domain.subscribe()
 
+    # hand = eye-in-hand (EE-mounted) · exo = eye-to-hand (fixed/external)
     handineye_domain = HandInEyeDomain(
         bridge,
         calibration_store,
-        settings.cameras.handineye_info,
-        settings.cameras.handineye_color,
+        settings.cameras.hand_info,
+        settings.cameras.hand_color,
     )
 
     handtoeye_domain = HandToEyeDomain(
         bridge,
         calibration_store,
-        settings.cameras.handtoeye_info,
-        settings.cameras.handtoeye_color,
+        settings.cameras.exo_info,
+        settings.cameras.exo_color,
     )
 
     camera_mgr.subscribe_all({
-        "handineye": settings.cameras.handineye_color,
-        "handtoeye": settings.cameras.handtoeye_color,
+        "hand": settings.cameras.hand_color,
+        "exo": settings.cameras.exo_color,
     })
 
     bridge.subscribe(
-        settings.cameras.handineye_info,
+        settings.cameras.hand_info,
         "sensor_msgs/msg/CameraInfo",
         handineye_domain.on_camera_info,
     )
     bridge.subscribe(
-        settings.cameras.handtoeye_info,
+        settings.cameras.exo_info,
         "sensor_msgs/msg/CameraInfo",
         handtoeye_domain.on_camera_info,
     )

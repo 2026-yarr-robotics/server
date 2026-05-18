@@ -67,8 +67,9 @@ def create_app() -> FastAPI:
                 _launcher,
                 settings.robot.joint_states,
                 config_dir=settings.workspace.config_dir,
-                camera_info_topic=settings.cameras.handineye_info,
-                depth_topic=settings.cameras.handineye_depth,
+                camera_info_topic=settings.cameras.hand_info,
+                depth_topic=settings.cameras.hand_depth,
+                skill_api_url=os.getenv("SKILL_API_URL", settings.skill_api.url),
             )
             _domain.subscribe()
             set_robot_domain(_domain)

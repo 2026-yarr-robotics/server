@@ -41,10 +41,17 @@ tmux new-session -d -s "$SESSION" -x 220 -y 50 -n "rosbridge"
 tmux send-keys -t "$SESSION:rosbridge" \
     "bash $SCRIPT_DIR/rosbridge.sh" Enter
 
-# ── 창 1: RealSense 카메라 ───────────────────────────────
-tmux new-window -t "$SESSION" -n "camera"
-tmux send-keys -t "$SESSION:camera" \
-    "source $ROS_SETUP && ros2 launch realsense2_camera rs_launch.py align_depth.enable:=true" Enter
+# ── 창 1: RealSense 카메라 (시리얼별 2대 분리) ────────────
+# exo  = eye-to-hand  (고정/외부 카메라, serial 24232207744)  → 토픽 /exo/exo/*
+# hand = eye-in-hand  (그리퍼 장착 카메라, serial 140122076335) → 토픽 /hand/hand/*
+# serial_no 는 realsense2_camera 권장 표기인 '_' 접두사 형식을 사용한다.
+tmux new-window -t "$SESSION" -n "cam-exo"
+tmux send-keys -t "$SESSION:cam-exo" \
+    "source $ROS_SETUP && ros2 launch realsense2_camera rs_launch.py camera_namespace:=exo camera_name:=exo serial_no:=_24232207744 align_depth.enable:=true" Enter
+
+tmux new-window -t "$SESSION" -n "cam-hand"
+tmux send-keys -t "$SESSION:cam-hand" \
+    "source $ROS_SETUP && ros2 launch realsense2_camera rs_launch.py camera_namespace:=hand camera_name:=hand serial_no:=_140122076335 align_depth.enable:=true" Enter
 
 # ── 창 2: bringup 에이전트 (포트 8099) ────────────────────
 tmux new-window -t "$SESSION" -n "bringup-agent"
@@ -73,10 +80,10 @@ echo " 컵 스태킹 로봇 시스템 시작 완료"
 echo "======================================================"
 echo " 세션 연결:   tmux attach -t $SESSION"
 echo " 창 전환:     Ctrl+b → 숫자"
-echo "   1 = rosbridge   2 = camera"
-echo "   3 = bringup-agent (port 8099)"
-echo "   4 = gripper"
-echo "   5 = server (Docker)"
+echo "   1 = rosbridge   2 = cam-exo (eye-to-hand)   3 = cam-hand (eye-in-hand)"
+echo "   4 = bringup-agent (port 8099)"
+echo "   5 = gripper"
+echo "   6 = server (Docker)"
 echo " 세션 종료:   tmux kill-session -t $SESSION"
 echo ""
 echo " 대시보드:    https://yarr.simplyimg.com"
