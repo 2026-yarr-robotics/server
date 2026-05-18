@@ -18,7 +18,12 @@ from ..config import WorkspaceConfig
 logger = logging.getLogger(__name__)
 
 BRINGUP_COMMANDS = {"bringup_sim", "bringup_real"}
-SERVICE_COMMANDS = {"cup_detection", "gripper"}  # gripper: Modbus-only, no MoveItPy conflict
+SERVICE_COMMANDS = {"cup_detection", "gripper", "skill_api"}
+# gripper: Modbus-only, no MoveItPy conflict.
+# skill_api: long-lived pick server, lazily started by RobotDomain.pick_skill.
+#   Listed here so it is an allowed command and is excluded from the
+#   single-action-task guard (it neither blocks nor is blocked by
+#   cup_pyramid / cup_unstack at the LaunchManager level).
 
 # Substrings that make a log line too noisy to show in the dashboard feed
 _LOG_NOISE = frozenset([
@@ -84,6 +89,11 @@ class LaunchManager:
         self._log_futures: dict[str, asyncio.Task[None]] = {}
 
     # ── Public properties ──────────────────────────────────────────────────────
+
+    @property
+    def agent_url(self) -> str | None:
+        """Host bringup-agent base URL, or None when running locally."""
+        return self._agent_url
 
     @property
     def bringup_task(self) -> RunningTask | None:

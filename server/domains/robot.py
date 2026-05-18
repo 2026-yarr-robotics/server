@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 # TF/ee_pose older than this is considered stale; get_ee_position returns None.
 EE_POSE_STALE_SEC = 1.0
 
+# Lazy skill_api lifecycle: started on the first pick via the bringup agent and
+# left running (no stop-after). MoveItPy init in skill_api_node is slow, so
+# allow a generous readiness window.
+SKILL_API_COMMAND = "skill_api"
+SKILL_API_READY_TIMEOUT = 90.0   # seconds to wait for /status ready=true
+SKILL_API_POLL_INTERVAL = 2.0    # seconds between readiness probes
+
 
 @dataclass
 class MoveLimits:
@@ -69,6 +76,7 @@ class RobotDomain:
         self._bridge = bridge
         self._launcher = launcher
         self._skill_api_url = skill_api_url.rstrip("/")
+        self._skill_api_lock = asyncio.Lock()
         self._status = RobotStatus()
         self._joint_topic = joint_states_topic
         self._subscribed = False
@@ -431,6 +439,75 @@ class RobotDomain:
             "pixel_y": py,
         }
 
+    async def _skill_api_ready(self) -> bool:
+        """True when skill_api_node answers GET /status with ready=true."""
+        url = f"{self._skill_api_url}/status"
+        loop = asyncio.get_running_loop()
+
+        def _probe() -> bool:
+            try:
+                with urllib.request.urlopen(url, timeout=3) as resp:
+                    data = json.loads(resp.read())
+                return bool(data.get("ready"))
+            except Exception:
+                return False
+
+        return await loop.run_in_executor(None, _probe)
+
+    async def _ensure_skill_api(self) -> None:
+        """Lazily start skill_api_node and wait until it is ready.
+
+        Policy: started once on the first pick via the host bringup agent
+        and left running (no stop-after).  skill_api_node hosts a MoveItPy
+        runtime, so it needs the robot bringup (MoveIt) already up and its
+        initialisation is slow — hence the generous readiness window.
+
+        Raises:
+            ConnectionError: no bringup agent to start it, or it did not
+                become ready within ``SKILL_API_READY_TIMEOUT``.
+        """
+        if await self._skill_api_ready():
+            return
+
+        async with self._skill_api_lock:
+            # Re-check: another concurrent pick may have started it.
+            if await self._skill_api_ready():
+                return
+
+            if not self._launcher.agent_url:
+                raise ConnectionError(
+                    f"skill_api_node not running at {self._skill_api_url} and "
+                    "no bringup agent (BRINGUP_AGENT_URL) configured to start "
+                    "it; launch it manually: "
+                    "'ros2 launch cup_stack skill_api.launch.py'"
+                )
+
+            logger.info(
+                "skill_api not ready; starting via bringup agent (%s)",
+                self._launcher.agent_url,
+            )
+            try:
+                await self._launcher.start(SKILL_API_COMMAND)
+            except Exception as exc:  # already starting / agent 409 / busy
+                logger.info(
+                    "skill_api start request returned %s; "
+                    "polling for readiness anyway",
+                    exc,
+                )
+
+            deadline = time.monotonic() + SKILL_API_READY_TIMEOUT
+            while time.monotonic() < deadline:
+                await asyncio.sleep(SKILL_API_POLL_INTERVAL)
+                if await self._skill_api_ready():
+                    logger.info("skill_api is ready")
+                    return
+
+            raise ConnectionError(
+                f"skill_api_node did not become ready within "
+                f"{SKILL_API_READY_TIMEOUT:.0f}s. Is the robot bringup "
+                "(MoveIt) running? skill_api_node hosts MoveItPy and needs it."
+            )
+
     async def pick_skill(
         self,
         x: float,
@@ -446,9 +523,13 @@ class RobotDomain:
         gripper Z via ``cup_top_z + cup_grip_z_offset``; pass ``z``
         instead to command a raw gripper Z directly.
 
+        skill_api_node is started lazily on the first pick (via the host
+        bringup agent) and left running for subsequent picks.
+
         Raises:
             ValueError: neither ``cup_top_z`` nor ``z`` supplied.
-            ConnectionError: skill_api_node unreachable.
+            ConnectionError: skill_api_node unreachable, or could not be
+                started / did not become ready (see message).
             RuntimeError: skill node returned an HTTP error
                 (message is ``"<status>: <body>"``).
         """
@@ -456,6 +537,8 @@ class RobotDomain:
             raise ValueError(
                 "provide 'cup_top_z' (cup top centre Z) or 'z' (gripper Z)"
             )
+
+        await self._ensure_skill_api()
 
         payload: dict[str, Any] = {"x": x, "y": y}
         if z is not None:
