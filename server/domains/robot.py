@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,9 @@ from ..ros.bridge import RosBridge
 from ..ros.launch import BRINGUP_COMMANDS, LaunchManager, TaskStatus
 
 logger = logging.getLogger(__name__)
+
+# TF/ee_pose older than this is considered stale; get_ee_position returns None.
+EE_POSE_STALE_SEC = 1.0
 
 
 @dataclass
@@ -65,6 +69,7 @@ class RobotDomain:
         self._subscribed = False
         self._commanded_pos: dict[str, float] | None = None
         self._ee_pos_ros: dict[str, float] | None = None
+        self._ee_pos_ros_ts: float | None = None
         self._config_dir = config_dir
         self._camera_info_topic = camera_info_topic
         self._depth_topic = depth_topic
@@ -148,12 +153,13 @@ class RobotDomain:
 
     def _on_ee_pose(self, msg: dict[str, Any]) -> None:
         pos = msg.get("pose", {}).get("position", {})
-        if pos:
+        if pos and {"x", "y", "z"} <= pos.keys():
             self._ee_pos_ros = {
-                "x": float(pos.get("x", 0.0)),
-                "y": float(pos.get("y", 0.0)),
-                "z": float(pos.get("z", 0.0)),
+                "x": float(pos["x"]),
+                "y": float(pos["y"]),
+                "z": float(pos["z"]),
             }
+            self._ee_pos_ros_ts = time.monotonic()
 
     def _on_tf(self, msg: dict[str, Any]) -> None:
         for t in msg.get("transforms", []):
@@ -175,6 +181,7 @@ class RobotDomain:
                 "y": float(ee_mat[1, 3]),
                 "z": float(ee_mat[2, 3]),
             }
+            self._ee_pos_ros_ts = time.monotonic()
 
     def _on_camera_info(self, msg: dict[str, Any]) -> None:
         k = msg.get("k", [0.0] * 9)
@@ -220,21 +227,28 @@ class RobotDomain:
         return {"name": name, "status": "stopped"}
 
     def get_ee_position(self) -> dict[str, float] | None:
-        # Report only the measured /ee_pose. No fallback to the last
-        # commanded target: a commanded goal is not the actual EE pose,
-        # so when /ee_pose is unavailable we return None.
-        return self._ee_pos_ros
+        ts = self._ee_pos_ros_ts
+        if (
+            self._ee_pos_ros is not None
+            and ts is not None
+            and (time.monotonic() - ts) <= EE_POSE_STALE_SEC
+        ):
+            return self._ee_pos_ros
+        return None
 
     def get_status(self) -> dict[str, Any]:
         s = self.status
+        # Snapshot once: _on_joint_state (rosbridge thread) may swap
+        # s.joints between field reads, producing mismatched arrays.
+        j = s.joints
         bringup = self._launcher.bringup_task
-        ee_pos = self._ee_pos_ros  # measured /ee_pose only; no commanded fallback
+        ee_pos = self.get_ee_position()
         return {
             "joints": {
-                "name": s.joints.name,
-                "position": s.joints.position,
-                "velocity": s.joints.velocity,
-                "effort": s.joints.effort,
+                "name": j.name,
+                "position": j.position,
+                "velocity": j.velocity,
+                "effort": j.effort,
             },
             "task": {
                 "name": s.task_name,
