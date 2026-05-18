@@ -39,4 +39,5 @@ if ! ros2 pkg list 2>/dev/null | grep -q "^rosbridge_server$"; then
 fi
 
 echo "Starting rosbridge_server on port 9090..."
-exec ros2 launch rosbridge_server rosbridge_websocket_launch.xml
+exec ros2 launch rosbridge_server rosbridge_websocket_launch.xml \
+    call_services_in_new_thread:=true
