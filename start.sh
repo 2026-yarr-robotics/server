@@ -51,7 +51,14 @@ tmux new-window -t "$SESSION" -n "bringup-agent"
 tmux send-keys -t "$SESSION:bringup-agent" \
     "python3 $SCRIPT_DIR/bringup_agent.py" Enter
 
-# ── 창 3: Docker 서버 (nginx + FastAPI + cloudflared) ────
+# ── 창 3: 그리퍼 노드 ────────────────────────────────────
+DOOSAN_SETUP="$HOME/ros2_ws/install/setup.bash"
+ROS2_CUP_STACK_SETUP="$SCRIPT_DIR/../ros2-cup-stack/ros2/install/setup.bash"
+tmux new-window -t "$SESSION" -n "gripper"
+tmux send-keys -t "$SESSION:gripper" \
+    "source $ROS_SETUP && source $DOOSAN_SETUP && source $ROS2_CUP_STACK_SETUP && ros2 launch cup_stack gripper.launch.py" Enter
+
+# ── 창 4: Docker 서버 (nginx + FastAPI + cloudflared) ────
 # -d 로 컨테이너를 분리 실행 → tmux 세션이 종료돼도 컨테이너가 유지됨
 tmux new-window -t "$SESSION" -n "server"
 tmux send-keys -t "$SESSION:server" \
@@ -68,7 +75,8 @@ echo " 세션 연결:   tmux attach -t $SESSION"
 echo " 창 전환:     Ctrl+b → 숫자"
 echo "   1 = rosbridge   2 = camera"
 echo "   3 = bringup-agent (port 8099)"
-echo "   4 = server (Docker)"
+echo "   4 = gripper"
+echo "   5 = server (Docker)"
 echo " 세션 종료:   tmux kill-session -t $SESSION"
 echo ""
 echo " 대시보드:    https://yarr.simplyimg.com"

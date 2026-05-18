@@ -4,7 +4,7 @@ set -e
 ROS_SETUP="/opt/ros/humble/setup.bash"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CUP_STACK_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
-CUP_STACK_SETUP="$CUP_STACK_ROOT/install/setup.bash"
+DOOSAN_SETUP="$HOME/ros2_ws/install/setup.bash"
 ROS2_CUP_STACK_SETUP="$CUP_STACK_ROOT/ros2-cup-stack/ros2/install/setup.bash"
 
 if [[ ! -f "$ROS_SETUP" ]]; then
@@ -14,10 +14,10 @@ fi
 
 source "$ROS_SETUP"
 
-if [[ -f "$CUP_STACK_SETUP" ]]; then
-    source "$CUP_STACK_SETUP"
+if [[ -f "$DOOSAN_SETUP" ]]; then
+    source "$DOOSAN_SETUP"
 else
-    echo "WARN: cup-stack overlay not found at $CUP_STACK_SETUP" >&2
+    echo "WARN: Doosan workspace not found at $DOOSAN_SETUP" >&2
 fi
 if [[ -f "$ROS2_CUP_STACK_SETUP" ]]; then
     source "$ROS2_CUP_STACK_SETUP"

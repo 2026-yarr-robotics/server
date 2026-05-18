@@ -10,6 +10,11 @@ source /opt/ros/humble/setup.bash
 [[ -f "$HOME/ros2_ws/install/setup.bash" ]]   && source "$HOME/ros2_ws/install/setup.bash"
 [[ -f "$HOME/install/setup.bash" ]]            && source "$HOME/install/setup.bash"
 
+echo "[REAL] 기존 bringup 프로세스 정리 중..."
+pkill -f "dsr_bringup2_moveit\.launch\.py" 2>/dev/null || true
+pkill -f "dsr_bringup2_rviz\.launch\.py"   2>/dev/null || true
+sleep 2
+
 echo "[REAL] DSR M0609 Bringup 시작 (mode=real, host=${ROBOT_IP})"
 
 ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py \
