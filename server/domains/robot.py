@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 # TF/ee_pose older than this is considered stale; get_ee_position returns None.
 EE_POSE_STALE_SEC = 1.0
 
+# Gripper width is published by gripper_node at ~5 Hz; older than this is
+# considered stale (hardware down / gripper_node not running) and reported
+# as None so the dashboard shows "—" instead of a frozen value.
+GRIPPER_WIDTH_STALE_SEC = 2.0
+
 # Lazy skill_api lifecycle: started on the first pick via the bringup agent and
 # left running (no stop-after). MoveItPy init in skill_api_node is slow, so
 # allow a generous readiness window.
@@ -83,6 +88,8 @@ class RobotDomain:
         self._commanded_pos: dict[str, float] | None = None
         self._ee_pos_ros: dict[str, float] | None = None
         self._ee_pos_ros_ts: float | None = None
+        self._gripper_mm: float | None = None
+        self._gripper_mm_ts: float | None = None
         self._config_dir = config_dir
         self._camera_info_topic = camera_info_topic
         self._depth_topic = depth_topic
@@ -147,6 +154,12 @@ class RobotDomain:
             "/tf_static",
             "tf2_msgs/msg/TFMessage",
             self._on_tf,
+        )
+        self._bridge.subscribe(
+            "/gripper/width",
+            "std_msgs/msg/Float32",
+            self._on_gripper_width,
+            throttle_rate=100,
         )
         if self._camera_info_topic:
             self._bridge.subscribe(
@@ -215,6 +228,12 @@ class RobotDomain:
         except Exception:
             pass
 
+    def _on_gripper_width(self, msg: dict[str, Any]) -> None:
+        data = msg.get("data")
+        if isinstance(data, (int, float)):
+            self._gripper_mm = float(data)
+            self._gripper_mm_ts = time.monotonic()
+
     def _on_joint_state(self, msg: dict[str, Any]) -> None:
         self._status.joints = JointState(
             name=msg.get("name", []),
@@ -249,6 +268,16 @@ class RobotDomain:
             return self._ee_pos_ros
         return None
 
+    def get_gripper_mm(self) -> float | None:
+        ts = self._gripper_mm_ts
+        if (
+            self._gripper_mm is not None
+            and ts is not None
+            and (time.monotonic() - ts) <= GRIPPER_WIDTH_STALE_SEC
+        ):
+            return self._gripper_mm
+        return None
+
     def get_status(self) -> dict[str, Any]:
         s = self.status
         # Snapshot once: _on_joint_state (rosbridge thread) may swap
@@ -273,6 +302,7 @@ class RobotDomain:
             },
             "tasks": self._launcher.list_tasks(),
             "ee_position": ee_pos,
+            "gripper": {"width_mm": self.get_gripper_mm()},
         }
 
     async def gripper_control(self, command: str) -> dict[str, Any]:
