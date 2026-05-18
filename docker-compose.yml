@@ -24,6 +24,7 @@ services:
       - ROSBRIDGE_HOST=host.docker.internal
       - ROSBRIDGE_PORT=9090
       - BRINGUP_AGENT_URL=http://host.docker.internal:8099
+      - SKILL_API_URL=http://host.docker.internal:8765
     volumes:
       - ../cup_stack/ros2:/app/ros2:ro
     networks:
