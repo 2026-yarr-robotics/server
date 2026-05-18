@@ -61,12 +61,21 @@ class EEPositionSchema(BaseModel):
     model_config = _example({"x": 0.45, "y": -0.12, "z": 0.30})
 
 
+class GripperStateSchema(BaseModel):
+    width_mm: Optional[float] = Field(
+        None, description="Live finger width in mm; null when stale/unknown"
+    )
+
+    model_config = _example({"width_mm": 74.8})
+
+
 class RobotStatusResponse(BaseModel):
     joints: JointStateSchema
     task: ActiveTaskSchema
     bringup: ActiveTaskSchema
     tasks: list[TaskSummarySchema]
     ee_position: Optional[EEPositionSchema] = None
+    gripper: Optional[GripperStateSchema] = None
 
     model_config = _example({
         "joints": {
@@ -84,6 +93,7 @@ class RobotStatusResponse(BaseModel):
             "pid": 12345,
         }],
         "ee_position": {"x": 0.45, "y": -0.12, "z": 0.30},
+        "gripper": {"width_mm": 74.8},
     })
 
 
