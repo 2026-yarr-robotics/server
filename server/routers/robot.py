@@ -16,6 +16,8 @@ from ..schemas import (
     GripperResponse,
     MoveRequest,
     MoveResponse,
+    PickSkillRequest,
+    PickSkillResponse,
     PixelToWorldResponse,
     RobotStatusResponse,
     TaskLogResponse,
@@ -168,6 +170,32 @@ async def pixel_to_world(px: int, py: int) -> dict:
         return domain.pixel_to_world(px, py)
     except ValueError as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+
+@router.post("/skill/pick", response_model=PickSkillResponse)
+async def skill_pick(body: PickSkillRequest) -> dict:
+    """Pick one cup at the given **cup bottom centre** coordinate.
+
+    Proxies to the ROS 2 skill_api_node (PickCupSkill). Supply
+    ``cup_bottom_z`` (converted to gripper Z server-side) or ``z``.
+    """
+    domain = _get_domain()
+    try:
+        return await domain.pick_skill(
+            body.x,
+            body.y,
+            cup_bottom_z=body.cup_bottom_z,
+            z=body.z,
+            ori=body.ori,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except RuntimeError as e:
+        msg = str(e)
+        status = 409 if msg.startswith("409") else 502
+        raise HTTPException(status_code=status, detail=msg)
 
 
 @router.get("/cups", response_model=CupDetectionFrame)

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import logging
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -61,9 +64,11 @@ class RobotDomain:
         config_dir: Path | None = None,
         camera_info_topic: str | None = None,
         depth_topic: str | None = None,
+        skill_api_url: str = "http://localhost:8765",
     ) -> None:
         self._bridge = bridge
         self._launcher = launcher
+        self._skill_api_url = skill_api_url.rstrip("/")
         self._status = RobotStatus()
         self._joint_topic = joint_states_topic
         self._subscribed = False
@@ -425,6 +430,65 @@ class RobotDomain:
             "pixel_x": px,
             "pixel_y": py,
         }
+
+    async def pick_skill(
+        self,
+        x: float,
+        y: float,
+        cup_bottom_z: float | None = None,
+        z: float | None = None,
+        ori: dict[str, float] | None = None,
+    ) -> dict[str, Any]:
+        """Proxy a single-cup pick to the ROS 2 skill_api_node.
+
+        Coordinates are the **cup bottom centre** (base_link, m).  When
+        ``cup_bottom_z`` is given the skill node converts it to the
+        gripper Z via ``cup_bottom_z + cup_grip_z_offset``; pass ``z``
+        instead to command a raw gripper Z directly.
+
+        Raises:
+            ValueError: neither ``cup_bottom_z`` nor ``z`` supplied.
+            ConnectionError: skill_api_node unreachable.
+            RuntimeError: skill node returned an HTTP error
+                (message is ``"<status>: <body>"``).
+        """
+        if cup_bottom_z is None and z is None:
+            raise ValueError(
+                "provide 'cup_bottom_z' (cup bottom centre Z) or 'z' (gripper Z)"
+            )
+
+        payload: dict[str, Any] = {"x": x, "y": y}
+        if z is not None:
+            payload["z"] = z
+        if cup_bottom_z is not None:
+            payload["cup_bottom_z"] = cup_bottom_z
+        if ori is not None:
+            payload["ori"] = ori
+
+        url = f"{self._skill_api_url}/skill/pick"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        loop = asyncio.get_running_loop()
+
+        def _call() -> dict[str, Any]:
+            try:
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode(errors="replace")
+                raise RuntimeError(f"{exc.code}: {body}") from exc
+            except urllib.error.URLError as exc:
+                raise ConnectionError(
+                    f"skill_api_node unreachable at {self._skill_api_url}: "
+                    f"{exc.reason}"
+                ) from exc
+
+        logger.info("pick_skill -> %s %s", url, payload)
+        return await loop.run_in_executor(None, _call)
 
 
 def _quat_to_matrix(
