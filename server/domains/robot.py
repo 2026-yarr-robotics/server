@@ -304,9 +304,8 @@ class RobotDomain:
         z: float,
         mode: str = "absolute",
     ) -> dict[str, Any]:
-        """Move robot end-effector via Doosan /motion/move_line (no MoveItPy)."""
+        """Move robot end-effector via Doosan /motion/move_line."""
         if mode == "relative":
-            # Relative delta — no clamping; orientation delta is zero
             req = {
                 "pos": [x * 1000.0, y * 1000.0, z * 1000.0, 0.0, 0.0, 0.0],
                 "vel": [50.0, 30.0],
@@ -314,12 +313,11 @@ class RobotDomain:
                 "time": 0.0,
                 "radius": 0.0,
                 "ref": 0,
-                "mode": 1,         # DR_MV_MOD_REL
+                "mode": 1,
                 "blend_type": 0,
-                "sync_type": 0,    # SYNC (blocking)
+                "sync_type": 0,
             }
         else:
-            # Absolute Cartesian move; keep tool pointing down (ry=180°)
             clamped = self._validate_target(x, y, z)
             target_x, target_y, target_z = clamped
             req = {
@@ -329,7 +327,7 @@ class RobotDomain:
                 "time": 0.0,
                 "radius": 0.0,
                 "ref": 0,
-                "mode": 0,         # DR_MV_MOD_ABS
+                "mode": 0,
                 "blend_type": 0,
                 "sync_type": 0,
             }
@@ -345,12 +343,16 @@ class RobotDomain:
             raise RuntimeError(f"Move failed: {exc}") from exc
 
         ok = bool(result.get("success", False)) if result else False
-        if ok and mode != "relative":
+        if not ok:
+            msg = result.get("message", "Move command failed") if result else "move_line service unavailable"
+            raise RuntimeError(msg)
+
+        if mode != "relative":
             self._commanded_pos = {"x": target_x, "y": target_y, "z": target_z}
 
         return {
-            "success": ok,
-            "message": "Moved" if ok else "Move command failed",
+            "success": True,
+            "message": "Moved",
             "position": self._commanded_pos,
         }
 
