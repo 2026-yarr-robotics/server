@@ -90,10 +90,13 @@ _task_statuses: dict[str, str] = {}  # idle | running | failed
 def _build_task_cmd(command: str, args: dict[str, str]) -> list[str]:
     install_setup = ROS2_WORKSPACE / "install" / "setup.bash"
     doosan_setup = Path.home() / "ros2_ws" / "install" / "setup.bash"
+    moveit_setup = Path.home() / "ws_moveit" / "install" / "setup.bash"
     ros_setup = "/opt/ros/humble/setup.bash"
     launch_args = " ".join(f"{k}:={v}" for k, v in args.items())
     ros_cmd = f"ros2 launch cup_stack {command}.launch.py {launch_args}".strip()
     full = f"source {ros_setup}"
+    if moveit_setup.exists():
+        full += f" && source {moveit_setup}"
     if doosan_setup.exists():
         full += f" && source {doosan_setup}"
     if install_setup.exists():
