@@ -177,7 +177,9 @@ async def skill_pick(body: PickSkillRequest) -> dict:
     """Pick one cup at the given **cup top centre** coordinate.
 
     Proxies to the ROS 2 skill_api_node (PickCupSkill). Supply
-    ``cup_top_z`` (converted to gripper Z server-side) or ``z``.
+    ``cup_top_z`` (converted to gripper Z server-side), ``z`` (raw
+    gripper Z), or ``nested_count`` (ROS 2 derives Z from the nested
+    stack height).
     """
     domain = _get_domain()
     try:
@@ -186,6 +188,7 @@ async def skill_pick(body: PickSkillRequest) -> dict:
             body.y,
             cup_top_z=body.cup_top_z,
             z=body.z,
+            nested_count=body.nested_count,
             ori=body.ori,
         )
     except ValueError as e:
