@@ -47,6 +47,7 @@ def create_app() -> FastAPI:
             settings.workspace,
             agent_url=os.getenv("BRINGUP_AGENT_URL"),
         )
+        _launcher.start_agent_reconcile()
 
         try:
             bridge = await connect_bridge(settings.rosbridge)

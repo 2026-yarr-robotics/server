@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -32,7 +33,11 @@ settings = AppSettings()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     bridge = await connect_bridge(settings.rosbridge)
-    launcher = LaunchManager(settings.workspace)
+    launcher = LaunchManager(
+        settings.workspace,
+        agent_url=os.getenv("BRINGUP_AGENT_URL"),
+    )
+    launcher.start_agent_reconcile()
     calibration_store = CalibrationStore(settings.workspace.config_dir)
     camera_mgr = CameraManager(bridge)
 

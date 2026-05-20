@@ -7,7 +7,7 @@ Listens on http://0.0.0.0:8099; Docker reaches it via host.docker.internal:8099.
 Endpoints
 ---------
 GET  /health          — liveness check
-GET  /status          — {"status": "idle|running|failed", "log": [...last 50 lines...]}
+GET  /status          — {"status": "idle|running|failed", "log": [...last 50 lines...], "external": bool}
 POST /start           — body: {"mode": "real"|"sim", "ip": "192.168.1.100"}
 POST /stop            — no body required
 """
@@ -35,6 +35,27 @@ PORT = 8099
 _SCRIPT_DIR = Path(__file__).resolve().parent
 CUP_STACK_DIR = _SCRIPT_DIR.parent / "ros2-cup-stack" / "ros2" / "src" / "cup_stack"
 ROS2_WORKSPACE = CUP_STACK_DIR.parent.parent  # ros2-cup-stack/ros2/
+
+# Pattern matching the host bringup launch process. Used by /status to
+# surface externally-started bringup (e.g. bringup_real.sh run from a
+# host shell) so the dashboard reflects reality regardless of who
+# started it.
+_BRINGUP_PROCESS_PATTERN = r"dsr_bringup2.*\.launch\.py"
+
+
+def _external_bringup_running() -> bool:
+    """True if a host bringup launch process is alive (pgrep)."""
+    try:
+        return subprocess.run(
+            ["pgrep", "-f", _BRINGUP_PROCESS_PATTERN],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=2,
+        ).returncode == 0
+    except Exception:
+        return False
+
 
 # ── Bringup state (protected by _lock) ────────────────────────────────────────
 _lock = threading.Lock()
@@ -108,11 +129,16 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"ok": True})
         elif path == "/status":
             with _lock:
-                data: dict[str, Any] = {
-                    "status": _status,
-                    "log": list(_log_lines[-50:]),
-                }
-            self._json(data)
+                st = _status
+                log_snap = list(_log_lines[-50:])
+            # If this agent didn't start bringup, surface CLI-launched
+            # bringup so the dashboard sees the real running state and
+            # the stop button maps to a real kill target.
+            external = False
+            if st == "idle" and _external_bringup_running():
+                st = "running"
+                external = True
+            self._json({"status": st, "log": log_snap, "external": external})
         elif path == "/task/status":
             name = params.get("name", "")
             if not name:

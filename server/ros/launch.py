@@ -87,6 +87,7 @@ class LaunchManager:
         self._tasks: dict[str, RunningTask] = {}        # action tasks only
         self._bringup: RunningTask | None = None        # at most one bringup
         self._log_futures: dict[str, asyncio.Task[None]] = {}
+        self._reconcile_task: asyncio.Task[None] | None = None
 
     # ── Public properties ──────────────────────────────────────────────────────
 
@@ -179,9 +180,8 @@ class LaunchManager:
             status=TaskStatus.RUNNING,
         )
         self._bringup = task
-        self._log_futures[command] = asyncio.create_task(
-            self._poll_agent(task)
-        )
+        # Status & logs are kept fresh by the long-lived agent-reconcile
+        # loop (start_agent_reconcile), so no per-start poll is spawned.
         return task
 
     async def _start_task_via_agent(
@@ -436,6 +436,9 @@ class LaunchManager:
         return task.log_lines[-tail:]
 
     async def shutdown_all(self) -> None:
+        if self._reconcile_task is not None:
+            self._reconcile_task.cancel()
+            self._reconcile_task = None
         for name in list(self._tasks.keys()):
             try:
                 await self.stop(name)
@@ -478,8 +481,29 @@ class LaunchManager:
             rc = task.process.returncode
             task.status = TaskStatus.IDLE if rc == 0 else TaskStatus.FAILED
 
-    async def _poll_agent(self, task: RunningTask) -> None:
-        """Sync bringup status and logs from the agent every second."""
+    def start_agent_reconcile(self) -> None:
+        """Spawn the long-lived bringup-agent reconcile loop.
+
+        Idempotent.  Without an agent URL this is a no-op (the bringup
+        agent is the ground truth, so there is nothing to reconcile
+        against when running fully locally).
+        """
+        if not self._agent_url:
+            return
+        if self._reconcile_task is not None and not self._reconcile_task.done():
+            return
+        self._reconcile_task = asyncio.create_task(self._reconcile_with_agent())
+
+    async def _reconcile_with_agent(self) -> None:
+        """Continuously align self._bringup with the host agent's truth.
+
+        The dashboard-tracked _bringup goes stale whenever bringup is
+        started or stopped outside the dashboard (host CLI, agent
+        restart, server restart while bringup is running).  This loop
+        re-syncs it every second so the WS payload's bringup.status
+        reflects the actual process state — the frontend then naturally
+        shows the right Start/Stop button.
+        """
         url = f"{self._agent_url}/status"
         loop = asyncio.get_running_loop()
 
@@ -488,23 +512,44 @@ class LaunchManager:
                 return json.loads(resp.read())
 
         while True:
-            await asyncio.sleep(1.0)
             try:
                 data = await loop.run_in_executor(None, _fetch)
-                task.log_lines = [
+                agent_st = data.get("status", "idle")
+                log_lines = [
                     l for l in data.get("log", [])
                     if not any(n in l for n in _LOG_NOISE)
                 ]
-                agent_st = data.get("status", "idle")
+
                 if agent_st == "running":
-                    task.status = TaskStatus.RUNNING
+                    if self._bringup is None:
+                        # External bringup (e.g. host-CLI launched, or
+                        # server-restart orphan): synthesise a task so
+                        # the dashboard sees and can stop it.  Mode is
+                        # not reported by /status, so default to real.
+                        self._bringup = RunningTask(
+                            name="bringup_real",
+                            command="bringup_real",
+                            args={},
+                            process=None,
+                            status=TaskStatus.RUNNING,
+                            log_lines=log_lines,
+                        )
+                    else:
+                        self._bringup.status = TaskStatus.RUNNING
+                        self._bringup.log_lines = log_lines
                 elif agent_st == "failed":
-                    task.status = TaskStatus.FAILED
-                    break
-                elif agent_st == "idle" and task.status == TaskStatus.RUNNING:
-                    task.status = TaskStatus.IDLE
-                    break
+                    if self._bringup is not None:
+                        self._bringup.status = TaskStatus.FAILED
+                        if log_lines:
+                            self._bringup.log_lines = log_lines
+                else:  # "idle" or unknown
+                    if self._bringup is not None:
+                        if self._bringup.status == TaskStatus.RUNNING:
+                            self._bringup.status = TaskStatus.IDLE
+                        if log_lines:
+                            self._bringup.log_lines = log_lines
             except asyncio.CancelledError:
                 break
             except Exception as exc:
-                logger.warning("Agent poll error: %s", exc)
+                logger.warning("Agent reconcile error: %s", exc)
+            await asyncio.sleep(1.0)
