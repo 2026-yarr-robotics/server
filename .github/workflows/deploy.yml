@@ -14,7 +14,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy to ssu-22663-27
+    name: Deploy server
     runs-on: ubuntu-latest
 
     steps:
@@ -26,12 +26,12 @@ jobs:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
         with:
-          host: 100.95.110.25
-          username: eunwoosong
+          host: ${{ vars.DEPLOY_HOST }}
+          username: ${{ vars.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
           script: |
             set -e
-            cd /home/eunwoosong/cup-stack/server
+            cd ${{ vars.DEPLOY_PATH }}
             git fetch --all --tags
             git checkout ${{ inputs.branch || github.ref_name }}
             docker compose up --build -d
