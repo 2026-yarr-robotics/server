@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI):
     )
     launcher.start_agent_reconcile()
     calibration_store = CalibrationStore(settings.workspace.config_dir)
-    camera_mgr = CameraManager(bridge)
+    camera_mgr = CameraManager(settings.rosbridge)
 
     robot_domain = RobotDomain(
         bridge,

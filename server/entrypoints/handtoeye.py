@@ -71,7 +71,7 @@ def create_app() -> FastAPI:
                 _domain.on_camera_info,
             )
 
-            _camera = CameraStream(bridge, settings.cameras.exo_color)
+            _camera = CameraStream(settings.rosbridge, settings.cameras.exo_color)
             _camera.subscribe()
 
         logger.info(
