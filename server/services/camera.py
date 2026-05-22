@@ -121,28 +121,21 @@ class CameraStream:
         inner = msg.get("msg")
         if not isinstance(inner, dict):
             return
-        data = inner.get("data")
-        # cbor-raw: byte string으로 도착 (base64 아님)
-        if not isinstance(data, (bytes, bytearray)):
+        # cbor-raw: ROS 메시지를 CDR wire-format 그대로 'bytes' 필드에 담아 보낸다
+        # (header.stamp만 secs/nsecs로 따로 발라냄). CompressedImage의 경우
+        # frame_id/format 문자열 헤더 뒤로 JPEG payload가 이어지므로
+        # JPEG SOI(FF D8 FF)부터 끝까지 잘라내면 바로 사용 가능.
+        payload = inner.get("bytes")
+        if not isinstance(payload, (bytes, bytearray)):
             return
-        jpeg = bytes(data)
-        if not jpeg.startswith(JPEG_PREFIX):
-            # PNG 등 다른 포맷이면 트랜스코딩 (드물지만 안전망)
-            try:
-                import cv2
-                import numpy as np
-
-                nparr = np.frombuffer(jpeg, dtype=np.uint8)
-                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                if frame is None:
-                    return
-                _, encoded = cv2.imencode(
-                    ".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80]
-                )
-                jpeg = encoded.tobytes()
-            except Exception:
-                return
-        self._latest_frame = jpeg
+        payload = bytes(payload)
+        jpeg_start = payload.find(JPEG_PREFIX)
+        if jpeg_start < 0:
+            logger.debug(
+                "no JPEG SOI in %s payload (len=%d)", self._topic, len(payload)
+            )
+            return
+        self._latest_frame = payload[jpeg_start:]
         for event in self._subscribers:
             event.set()
 
