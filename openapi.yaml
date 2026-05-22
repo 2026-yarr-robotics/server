@@ -299,6 +299,25 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/PyramidSkillRequest"
+            examples:
+              tier1_left:
+                summary: "1l — bottom 왼쪽"
+                value: { x: 0.40, y: 0.10, slot: "1l" }
+              tier1_mid:
+                summary: "1m — bottom 가운데"
+                value: { x: 0.40, y: 0.10, slot: "1m" }
+              tier1_right:
+                summary: "1r — bottom 오른쪽"
+                value: { x: 0.40, y: 0.10, slot: "1r" }
+              tier2_left:
+                summary: "2l — middle 왼쪽"
+                value: { x: 0.40, y: 0.10, slot: "2l" }
+              tier2_right:
+                summary: "2r — middle 오른쪽"
+                value: { x: 0.40, y: 0.10, slot: "2r" }
+              tier3_top:
+                summary: "3m — top (단일)"
+                value: { x: 0.40, y: 0.10, slot: "3m" }
       responses:
         "200":
           description: 스킬 실행 결과
@@ -312,6 +331,94 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/skill/pick:
+    post:
+      tags: [robot]
+      summary: 단일 컵 pick 스킬
+      description: |
+        지정한 컵 윗면 중앙(`x`, `y`)에서 컵 하나를 집는다. Z 는
+        `z` (raw gripper Z) / `cup_top_z` (서버가 grip offset 가산) /
+        `nested_count` (ROS 2 가 nested 스택 높이로 산출) 중 하나로 지정.
+        ROS 2 `skill_api_node` 로 프록시되며 첫 호출 시 lazy 시작.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PickSkillRequest"
+            examples:
+              by_nested_count:
+                summary: nested 스택 높이로 Z 산출
+                value: { x: 0.45, y: -0.12, nested_count: 1 }
+              by_cup_top_z:
+                summary: 컵 윗면 Z 명시
+                value: { x: 0.45, y: -0.12, cup_top_z: 0.05 }
+              by_raw_z:
+                summary: 그리퍼 raw Z 명시
+                value: { x: 0.45, y: -0.12, z: 0.15 }
+      responses:
+        "200":
+          description: 스킬 실행 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PickSkillResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/BadRequest"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/cups:
+    get:
+      tags: [robot]
+      summary: 컵 감지 결과 조회
+      description: |
+        ROS 2 `/cup_poses` 토픽의 최신 프레임 — YOLO 가 인식한 컵 목록과
+        각 컵의 픽셀 좌표 · bbox · base_link 3D 위치(가능 시).
+        `cup_detection` task 가 실행 중이어야 데이터가 들어온다.
+      responses:
+        "200":
+          description: 마지막 감지 프레임
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CupDetectionFrame"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/pixel-to-world:
+    get:
+      tags: [robot]
+      summary: 픽셀 → base_link 좌표 변환
+      description: |
+        EE 장착 카메라(hand-in-eye)의 픽셀 좌표를 base_link 의 3D 좌표로
+        변환한다. depth 이미지 · 카메라 intrinsics · hand-eye 캘리브레이션이
+        모두 준비되어 있어야 한다.
+      parameters:
+        - name: px
+          in: query
+          required: true
+          schema: { type: integer }
+        - name: py
+          in: query
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: 변환된 좌표
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PixelToWorldResponse"
+        "503":
+          description: TF / intrinsics / depth / 캘리브레이션 미준비
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
 
   /api/robot/gripper:
     post:
@@ -805,6 +912,127 @@ components:
       properties:
         matrix:
           $ref: "#/components/schemas/Matrix4x4"
+
+    # ── Pick Skill ──
+
+    PickSkillRequest:
+      type: object
+      required: [x, y]
+      description: |
+        좌표는 컵 윗면 중앙(base_link, m). Z 는 `z` (raw gripper Z) /
+        `cup_top_z` (서버가 grip offset 가산) / `nested_count` (ROS 2 가
+        nested 스택 높이로 산출) 중 정확히 하나로 지정.
+      properties:
+        x:
+          type: number
+          format: double
+          description: 컵 윗면 중앙 X (base_link, m)
+        y:
+          type: number
+          format: double
+          description: 컵 윗면 중앙 Y (base_link, m)
+        cup_top_z:
+          type: number
+          format: double
+          nullable: true
+          description: 컵 윗면 Z (m). 서버에서 grip offset 가산
+        z:
+          type: number
+          format: double
+          nullable: true
+          description: 그리퍼 raw Z (m). cup_top_z 대신 직접 지정 시
+        nested_count:
+          type: integer
+          minimum: 1
+          nullable: true
+          description: 소스 스택 nested 컵 개수. ROS 2 가 Z 산출
+        ori:
+          type: object
+          nullable: true
+          description: "그리퍼 방향 quaternion {x,y,z,w}. 미지정 시 down"
+
+    PickSkillResponse:
+      type: object
+      required: [success, skill]
+      properties:
+        success: { type: boolean }
+        skill: { type: string, example: pick }
+        detail: { type: string }
+
+    # ── Cup Detection ──
+
+    PixelPoint:
+      type: object
+      required: [x, y]
+      properties:
+        x: { type: number, format: double, description: 픽셀 X }
+        y: { type: number, format: double, description: 픽셀 Y }
+
+    BoundingBox:
+      type: object
+      required: [x_min, y_min, x_max, y_max]
+      properties:
+        x_min: { type: number, format: double }
+        y_min: { type: number, format: double }
+        x_max: { type: number, format: double }
+        y_max: { type: number, format: double }
+
+    CupInfo:
+      type: object
+      required: [id, label, confidence, pixel, bbox]
+      properties:
+        id:
+          type: string
+          description: 프레임 내 고유 ID
+          example: cup_0
+        label:
+          type: string
+          example: cup
+        confidence:
+          type: number
+          format: double
+          minimum: 0.0
+          maximum: 1.0
+        position:
+          $ref: "#/components/schemas/EEPosition"
+          nullable: true
+          description: base_link 3D 좌표 (m). depth 실패 시 null
+        pixel:
+          $ref: "#/components/schemas/PixelPoint"
+        bbox:
+          $ref: "#/components/schemas/BoundingBox"
+
+    CupDetectionFrame:
+      type: object
+      required: [stamp, frame_id, count, cups]
+      properties:
+        stamp:
+          type: number
+          format: double
+          description: UNIX 타임스탬프 (초)
+        frame_id:
+          type: string
+          example: base_link
+        count:
+          type: integer
+          description: 감지된 컵 수
+        cups:
+          type: array
+          items:
+            $ref: "#/components/schemas/CupInfo"
+
+    PixelToWorldResponse:
+      type: object
+      required: [x, y, z, depth_mm, pixel_x, pixel_y]
+      properties:
+        x: { type: number, format: double, description: base_link X (m) }
+        y: { type: number, format: double, description: base_link Y (m) }
+        z: { type: number, format: double, description: base_link Z (m) }
+        depth_mm:
+          type: integer
+          description: 픽셀 깊이 (mm)
+        pixel_x: { type: integer }
+        pixel_y: { type: integer }
 
     # ── Pyramid Skill ──
 
