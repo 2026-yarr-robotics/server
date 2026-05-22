@@ -45,7 +45,7 @@ class CameraStream:
         # throttle_rate_ms=100 → rosbridge 측에서 미리 10 FPS 로 제한해
         # 들여 오는 frame 자체를 줄여 CPU 부담도 감소.
         throttle_rate_ms: int = 100,
-        target_width: int = 640,
+        target_width: int = 800,
         jpeg_quality: int = 50,
     ) -> None:
         self._config = config
