@@ -77,7 +77,7 @@ class CameraTopics:
 
     Two RealSense cameras are launched under distinct namespaces by serial:
 
-    - ``exo``  = eye-to-hand  (fixed/external camera, serial 24232207744)
+    - ``exo``  = eye-to-hand  (fixed/external camera, serial 242322077444)
                  → topics under ``/exo/exo/``
     - ``hand`` = eye-in-hand  (EE-mounted camera, serial 140122076335)
                  → topics under ``/hand/hand/``

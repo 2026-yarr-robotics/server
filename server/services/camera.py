@@ -19,7 +19,9 @@ import json
 import logging
 from typing import AsyncIterator
 
+import cv2
 import cbor2
+import numpy as np
 import websockets
 
 from ..config import RosBridgeConfig
@@ -37,11 +39,20 @@ class CameraStream:
         config: RosBridgeConfig,
         topic: str,
         *,
-        throttle_rate_ms: int = 33,
+        # ROS 노드(vision 팀 공유)는 1280x720x30 그대로 두고, 외부 cloudflared
+        # 단의 throughput 한계(~5 Mbps)에 맞춰 이 서버 단에서 한 번 더
+        # 다운스케일+저화질 JPEG 으로 re-encode 한 뒤 브라우저로 push 한다.
+        # throttle_rate_ms=100 → rosbridge 측에서 미리 10 FPS 로 제한해
+        # 들여 오는 frame 자체를 줄여 CPU 부담도 감소.
+        throttle_rate_ms: int = 100,
+        target_width: int = 640,
+        jpeg_quality: int = 50,
     ) -> None:
         self._config = config
         self._topic = topic
         self._throttle_rate_ms = throttle_rate_ms
+        self._target_width = target_width
+        self._jpeg_quality = jpeg_quality
         self._latest_frame: bytes = b""
         self._subscribers: list[asyncio.Event] = []
         self._task: asyncio.Task | None = None
@@ -135,7 +146,28 @@ class CameraStream:
                 "no JPEG SOI in %s payload (len=%d)", self._topic, len(payload)
             )
             return
-        self._latest_frame = payload[jpeg_start:]
+        src_jpeg = payload[jpeg_start:]
+        # 외부 throughput 부담을 줄이기 위해 한 번 더 작게 re-encode.
+        # 원본보다 폭이 작거나 같으면 decode 비용 없이 원본을 그대로 쓴다.
+        try:
+            arr = np.frombuffer(src_jpeg, dtype=np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+            if img is None:
+                self._latest_frame = src_jpeg
+            else:
+                h, w = img.shape[:2]
+                if w > self._target_width:
+                    scale = self._target_width / float(w)
+                    new_size = (self._target_width, int(round(h * scale)))
+                    img = cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
+                ok, encoded = cv2.imencode(
+                    ".jpg", img,
+                    [int(cv2.IMWRITE_JPEG_QUALITY), int(self._jpeg_quality)],
+                )
+                self._latest_frame = encoded.tobytes() if ok else src_jpeg
+        except Exception:
+            logger.exception("re-encode failed for %s", self._topic)
+            self._latest_frame = src_jpeg
         for event in self._subscribers:
             event.set()
 
