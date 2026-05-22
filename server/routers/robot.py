@@ -10,7 +10,6 @@ from ..ros.launch import ALL_COMMANDS
 from ..schemas import (
     BringupRequest,
     CupDetectionFrame,
-    CupTriggerRequest,
     EEPositionSchema,
     GripperRequest,
     GripperResponse,
@@ -19,6 +18,10 @@ from ..schemas import (
     PickSkillRequest,
     PickSkillResponse,
     PixelToWorldResponse,
+    PyramidConfigResponse,
+    PyramidConfigUpdate,
+    PyramidSkillRequest,
+    PyramidSkillResponse,
     RobotStatusResponse,
     TaskLogResponse,
     TaskStartedResponse,
@@ -135,8 +138,8 @@ async def get_ee_position() -> dict:
     return pos
 
 
-@router.get("/workspace/limits", response_model=WorkspaceLimitsResponse)
-async def get_workspace_limits() -> dict:
+@router.get("/config/workspace", response_model=WorkspaceLimitsResponse)
+async def get_workspace_config() -> dict:
     return _get_domain().move_limits
 
 
@@ -201,22 +204,53 @@ async def skill_pick(body: PickSkillRequest) -> dict:
         raise HTTPException(status_code=status, detail=msg)
 
 
+@router.get("/config/pyramid", response_model=PyramidConfigResponse)
+async def get_pyramid_config() -> dict:
+    """현재 피라미드 설정과 6개 슬롯의 절대 place 좌표 캐시.
+
+    cp(center)가 아직 설정 안 됐고 HOME EE 좌표도 수신 못했으면 503.
+    """
+    domain = _get_domain()
+    try:
+        return domain.get_pyramid_config()
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@router.post("/config/pyramid", response_model=PyramidConfigResponse)
+async def update_pyramid_config(body: PyramidConfigUpdate) -> dict:
+    """피라미드 설정 갱신 (center / degree / pick_z 중 보낸 필드만)."""
+    domain = _get_domain()
+    try:
+        center = body.center.model_dump() if body.center is not None else None
+        return domain.set_pyramid_config(
+            center=center,
+            degree=body.degree,
+            pick_z=body.pick_z,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/skill/pyramid", response_model=PyramidSkillResponse)
+async def skill_pyramid(body: PyramidSkillRequest) -> dict:
+    """단일 컵을 pick 해서 지정한 피라미드 slot 으로 place.
+
+    cp/degree/pick_z 는 서버의 /config/pyramid 에 저장된 값을 사용.
+    """
+    domain = _get_domain()
+    try:
+        return await domain.pyramid_skill(body.x, body.y, body.slot)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except RuntimeError as e:
+        msg = str(e)
+        status = 409 if msg.startswith("409") else 502
+        raise HTTPException(status_code=status, detail=msg)
+
+
 @router.get("/cups", response_model=CupDetectionFrame)
 async def get_cups() -> dict:
     return _get_cup_domain().get_cups()
-
-
-@router.post("/cups/trigger", response_model=TaskStartedResponse)
-async def trigger_cup_task(body: CupTriggerRequest) -> dict:
-    domain = _get_cup_domain()
-    try:
-        return await domain.trigger_task(body.cup_id, body.task)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except KeyError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except RuntimeError as e:
-        detail = str(e)
-        if "cup_detection task is not running" in detail:
-            raise HTTPException(status_code=503, detail=detail)
-        raise HTTPException(status_code=409, detail=detail)

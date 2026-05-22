@@ -4,7 +4,6 @@ from server.schemas import (
     BoundingBox,
     CupDetectionFrame,
     CupInfo,
-    CupTriggerRequest,
     EEPositionSchema,
     PixelPoint,
     TaskStartedResponse,
@@ -77,20 +76,14 @@ def test_cup_detection_frame_with_cups():
     assert frame.cups[0].id == "cup_0"
 
 
-def test_cup_trigger_request():
-    req = CupTriggerRequest(cup_id="cup_0", task="cup_pyramid_web")
-    assert req.cup_id == "cup_0"
-    assert req.task == "cup_pyramid_web"
-
-
 def test_task_started_response_pid_optional():
-    r = TaskStartedResponse(name="cup_pyramid_web", status="running", pid=None)
+    r = TaskStartedResponse(name="gripper", status="running", pid=None)
     assert r.pid is None
 
-    r2 = TaskStartedResponse(name="cup_pyramid_web", status="running", pid=1234)
+    r2 = TaskStartedResponse(name="gripper", status="running", pid=1234)
     assert r2.pid == 1234
 
 
 def test_task_stopped_response():
-    r = TaskStoppedResponse(name="cup_pyramid_web", status="stopped")
+    r = TaskStoppedResponse(name="gripper", status="stopped")
     assert r.status == "stopped"

@@ -14,8 +14,6 @@ logger = logging.getLogger(__name__)
 _CUP_POSES_TOPIC = "/cup_poses"
 _CUP_POSES_TYPE = "cup_stack_interfaces/msg/CupPoseArray"
 
-WEB_TASK_COMMANDS = {"cup_pyramid_web", "cup_unstack_web"}
-
 
 class CupDetectionDomain:
     """Subscribes to /cup_poses and exposes current cup detection state."""
@@ -100,31 +98,3 @@ class CupDetectionDomain:
             if cup["id"] == cup_id:
                 return cup
         return None
-
-    async def trigger_task(
-        self,
-        cup_id: str,
-        task: str,
-    ) -> dict[str, Any]:
-        if task not in WEB_TASK_COMMANDS:
-            raise ValueError(f"task must be one of {sorted(WEB_TASK_COMMANDS)}")
-
-        if not self.is_running():
-            raise RuntimeError("cup_detection task is not running")
-
-        cup = self.get_cup_by_id(cup_id)
-        if cup is None:
-            raise KeyError(f"cup_id '{cup_id}' not found in current detections")
-
-        pixel_x = str(int(cup["pixel"]["x"]))
-        pixel_y = str(int(cup["pixel"]["y"]))
-
-        running_task = await self._launcher.start(
-            task,
-            {"pixel_x": pixel_x, "pixel_y": pixel_y},
-        )
-        return {
-            "name": running_task.name,
-            "status": running_task.status.value,
-            "pid": running_task.process.pid if running_task.process else None,
-        }

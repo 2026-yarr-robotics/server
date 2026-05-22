@@ -20,10 +20,8 @@ logger = logging.getLogger(__name__)
 BRINGUP_COMMANDS = {"bringup_sim", "bringup_real"}
 SERVICE_COMMANDS = {"cup_detection", "gripper", "skill_api"}
 # gripper: Modbus-only, no MoveItPy conflict.
-# skill_api: long-lived pick server, lazily started by RobotDomain.pick_skill.
-#   Listed here so it is an allowed command and is excluded from the
-#   single-action-task guard (it neither blocks nor is blocked by
-#   cup_pyramid / cup_unstack at the LaunchManager level).
+# skill_api: long-lived pick / pyramid server, lazily started by
+#   RobotDomain.pick_skill / pyramid_skill.
 
 # Substrings that make a log line too noisy to show in the dashboard feed
 _LOG_NOISE = frozenset([
@@ -35,14 +33,7 @@ _LOG_NOISE = frozenset([
     "Service response received for initialization",
     "Waiting for '/controller_manager'",
 ])
-TASK_COMMANDS = {
-    "cup_pyramid",
-    "cup_unstack",
-    "cup_pyramid_select",
-    "cup_unstack_select",
-    "cup_pyramid_web",
-    "cup_unstack_web",
-}
+TASK_COMMANDS: set[str] = set()
 ALL_COMMANDS = BRINGUP_COMMANDS | TASK_COMMANDS | SERVICE_COMMANDS
 
 
@@ -73,7 +64,7 @@ class LaunchManager:
     """Tracks and controls ROS 2 launch subprocesses.
 
     Bringup commands (bringup_sim / bringup_real) are delegated to the host
-    bringup agent when *agent_url* is set.  Action tasks (cup_pyramid, etc.)
+    bringup agent when *agent_url* is set.  Action tasks (when registered)
     always run as local subprocesses.
     """
 

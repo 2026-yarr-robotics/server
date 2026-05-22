@@ -12,10 +12,8 @@ def test_cup_detection_in_service_commands():
     assert "cup_detection" in SERVICE_COMMANDS
 
 
-
-def test_web_tasks_in_task_commands():
-    assert "cup_pyramid_web" in TASK_COMMANDS
-    assert "cup_unstack_web" in TASK_COMMANDS
+def test_task_commands_empty():
+    assert TASK_COMMANDS == set()
 
 
 def test_all_commands_union():

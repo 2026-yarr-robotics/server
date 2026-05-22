@@ -99,15 +99,15 @@ paths:
             schema:
               $ref: "#/components/schemas/TaskStartRequest"
             examples:
-              pyramid:
-                summary: cup_pyramid (HOME XY 기준)
-                value: { task: cup_pyramid, args: { nest_inc: "0.0127" } }
-              pyramid_web:
-                summary: cup_pyramid_web (픽셀 좌표 지정)
-                value: { task: cup_pyramid_web, args: { pixel_x: "320", pixel_y: "240" } }
-              unstack_web:
-                summary: cup_unstack_web (픽셀 좌표 지정)
-                value: { task: cup_unstack_web, args: { pixel_x: "160", pixel_y: "120" } }
+              gripper:
+                summary: gripper 서비스 노드 시작
+                value: { task: gripper, args: {} }
+              cup_detection:
+                summary: cup_detection 시작
+                value: { task: cup_detection, args: {} }
+              skill_api:
+                summary: skill_api 서버 시작
+                value: { task: skill_api, args: {} }
       responses:
         "200":
           description: 태스크 시작됨
@@ -134,7 +134,7 @@ paths:
             schema:
               $ref: "#/components/schemas/TaskStopRequest"
             example:
-              name: cup_pyramid_web
+              name: gripper
       responses:
         "200":
           description: 태스크 중지됨
@@ -161,7 +161,7 @@ paths:
           description: 태스크 이름
           schema:
             type: string
-            example: cup_pyramid_web
+            example: gripper
         - name: tail
           in: query
           required: false
@@ -212,7 +212,7 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
-  /api/robot/workspace/limits:
+  /api/robot/config/workspace:
     get:
       tags: [robot]
       summary: 작업공간 한계 조회
@@ -232,6 +232,84 @@ paths:
                 z_min: 0.25
                 z_max: 0.55
                 grid_spacing: 0.05
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
+  /api/robot/config/pyramid:
+    get:
+      tags: [robot]
+      summary: 피라미드 설정 조회
+      description: |
+        3-2-1 피라미드의 중심 좌표(cp), 행 방향 yaw(degree), pick Z 와
+        6개 슬롯의 절대 place 좌표 캐시를 반환한다. cp 가 아직 설정되지
+        않았으면 HOME EE 좌표로 lazy 초기화하며, HOME EE 좌표 미수신 시 503.
+      responses:
+        "200":
+          description: 현재 피라미드 설정
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PyramidConfigResponse"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+    post:
+      tags: [robot]
+      summary: 피라미드 설정 갱신
+      description: |
+        center / degree / pick_z 중 보낸 필드만 갱신한다. degree 는
+        `% 360` wrap, center XY 는 워크스페이스 범위 검증. 갱신 후 6개
+        슬롯의 z 가 workspace z_max 를 초과하면 422.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PyramidConfigUpdate"
+            examples:
+              degree_only:
+                summary: yaw 만 변경
+                value: { degree: 45.0 }
+              center_only:
+                summary: center 만 변경
+                value: { center: { x: 0.48, y: -0.05 } }
+      responses:
+        "200":
+          description: 갱신된 피라미드 설정
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PyramidConfigResponse"
+        "422":
+          $ref: "#/components/responses/BadRequest"
+
+  /api/robot/skill/pyramid:
+    post:
+      tags: [robot]
+      summary: 피라미드 단위 스킬 (1 cup pick-and-place)
+      description: |
+        지정한 pick 좌표(x, y)에서 컵 하나를 잡아 피라미드의 지정된
+        slot 위치에 놓는다. cp / degree / pick_z 는 `/config/pyramid` 에
+        저장된 값을 자동 주입.
+
+        호출자는 일반적으로 6번 (1l → 1m → 1r → 2l → 2r → 3m) 호출하여
+        3-2-1 피라미드를 완성한다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PyramidSkillRequest"
+      responses:
+        "200":
+          description: 스킬 실행 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PyramidSkillResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          $ref: "#/components/responses/BadRequest"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
@@ -450,7 +528,7 @@ components:
         name:
           type: string
           nullable: true
-          example: cup_pyramid_web
+          example: gripper
         status:
           $ref: "#/components/schemas/TaskStatus"
 
@@ -561,13 +639,9 @@ components:
         task:
           type: string
           enum:
-            - cup_pyramid
-            - cup_unstack
-            - cup_pyramid_select
-            - cup_unstack_select
-            - cup_pyramid_web
-            - cup_unstack_web
-            - move_cartesian
+            - cup_detection
+            - gripper
+            - skill_api
             - bringup_sim
             - bringup_real
           description: |
@@ -575,30 +649,17 @@ components:
 
             | 값 | 설명 |
             |---|---|
-            | `cup_pyramid` | HOME XY 기준 피라미드 빌드 |
-            | `cup_unstack` | HOME XY 기준 언스택 |
-            | `cup_pyramid_select` | OpenCV 클릭으로 위치 선택 후 피라미드 빌드 |
-            | `cup_unstack_select` | OpenCV 클릭으로 위치 선택 후 언스택 |
-            | `cup_pyramid_web` | 픽셀 좌표(`pixel_x`, `pixel_y`) 기반 피라미드 빌드 |
-            | `cup_unstack_web` | 픽셀 좌표(`pixel_x`, `pixel_y`) 기반 언스택 |
-            | `move_cartesian` | `/move_cartesian` + `/gripper_control` ROS 서비스 노드 |
-          example: cup_pyramid_web
+            | `cup_detection` | YOLO 컵 인식 노드 (`/cup_poses` publish) |
+            | `gripper` | OnRobot 그리퍼 ROS 서비스 노드 |
+            | `skill_api` | pick / pyramid 단위 스킬 HTTP 서버 |
+          example: gripper
         args:
           type: object
           additionalProperties:
             type: string
           description: |
             launch 파일에 전달할 추가 인자. `key:=value` 형식으로 변환된다.
-
-            `cup_pyramid_web` / `cup_unstack_web` 필수 키:
-            - `pixel_x`: 카메라 픽셀 X (정수 문자열)
-            - `pixel_y`: 카메라 픽셀 Y (정수 문자열)
-
-            모든 태스크 공통 선택 키:
-            - `nest_inc`: nested cup 높이 증가량(m), 기본값 `"0.0127"`
-          example:
-            pixel_x: "320"
-            pixel_y: "240"
+          example: {}
 
     TaskStopRequest:
       type: object
@@ -607,7 +668,7 @@ components:
         name:
           type: string
           description: 중지할 태스크 이름
-          example: cup_pyramid_web
+          example: gripper
 
     TaskStartedResponse:
       type: object
@@ -615,7 +676,7 @@ components:
       properties:
         name:
           type: string
-          example: cup_pyramid_web
+          example: gripper
         status:
           $ref: "#/components/schemas/TaskStatus"
         pid:
@@ -629,7 +690,7 @@ components:
       properties:
         name:
           type: string
-          example: cup_pyramid_web
+          example: gripper
         status:
           type: string
           example: stopped
@@ -640,15 +701,15 @@ components:
       properties:
         name:
           type: string
-          example: cup_pyramid_web
+          example: gripper
         log:
           type: array
           items:
             type: string
           example:
-            - "[INFO] Moving HOME"
-            - "[INFO] CYCLE 1/6 pick(stack=6, z=0.386)"
-            - "[INFO] GRIP"
+            - "[INFO] [launch]: process started"
+            - "[INFO] [gripper]: opening"
+            - "[INFO] [gripper]: opened"
 
     GripperRequest:
       type: object
@@ -745,6 +806,87 @@ components:
         matrix:
           $ref: "#/components/schemas/Matrix4x4"
 
+    # ── Pyramid Skill ──
+
+    PyramidConfigCenter:
+      type: object
+      required: [x, y]
+      properties:
+        x:
+          type: number
+          format: double
+          description: 피라미드 중심 X (base_link, m)
+        y:
+          type: number
+          format: double
+          description: 피라미드 중심 Y (base_link, m)
+
+    PyramidSlotXYZ:
+      type: object
+      required: [x, y, z]
+      properties:
+        x: { type: number, format: double }
+        y: { type: number, format: double }
+        z: { type: number, format: double }
+
+    PyramidConfigResponse:
+      type: object
+      required: [center, degree, pick_z, slots]
+      properties:
+        center:
+          $ref: "#/components/schemas/PyramidConfigCenter"
+        degree:
+          type: number
+          format: double
+          description: 행 방향 yaw (deg, [0, 360))
+        pick_z:
+          type: number
+          format: double
+          description: 그리퍼 pick Z (base_link, m)
+        slots:
+          type: object
+          description: "키: 1l/1m/1r/2l/2r/3m, 값: 절대 place 좌표"
+          additionalProperties:
+            $ref: "#/components/schemas/PyramidSlotXYZ"
+
+    PyramidConfigUpdate:
+      type: object
+      description: 보낸 필드만 갱신
+      properties:
+        center:
+          $ref: "#/components/schemas/PyramidConfigCenter"
+        degree:
+          type: number
+          format: double
+        pick_z:
+          type: number
+          format: double
+
+    PyramidSkillRequest:
+      type: object
+      required: [x, y, slot]
+      properties:
+        x:
+          type: number
+          format: double
+          description: pick 컵 윗면 중앙 X (base_link, m)
+        y:
+          type: number
+          format: double
+          description: pick 컵 윗면 중앙 Y (base_link, m)
+        slot:
+          type: string
+          enum: [ "1l", "1m", "1r", "2l", "2r", "3m" ]
+          description: 놓을 슬롯 키
+
+    PyramidSkillResponse:
+      type: object
+      required: [success, skill]
+      properties:
+        success: { type: boolean }
+        skill: { type: string, example: pyramid }
+        detail: { type: string }
+
     # ── Error ──
 
     ErrorDetail:
@@ -753,7 +895,7 @@ components:
         detail:
           type: string
           description: 에러 설명
-          example: "Invalid task. Choose from: ['bringup_real', 'cup_pyramid', ...]"
+          example: "Invalid task. Choose from: ['bringup_real', 'bringup_sim', 'cup_detection', 'gripper', 'skill_api']"
 
   responses:
 
@@ -771,7 +913,7 @@ components:
           schema:
             $ref: "#/components/schemas/ErrorDetail"
           example:
-            detail: "No task named 'cup_pyramid_web'"
+            detail: "No task named 'gripper'"
 
     Conflict:
       description: 이미 실행 중인 태스크가 있어 새 태스크를 시작할 수 없음

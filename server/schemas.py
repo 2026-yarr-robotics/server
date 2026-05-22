@@ -7,7 +7,7 @@ sample payload for each request and response.
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -36,7 +36,7 @@ class ActiveTaskSchema(BaseModel):
     name: Optional[str] = None
     status: str = "idle"
 
-    model_config = _example({"name": "cup_pyramid_web", "status": "running"})
+    model_config = _example({"name": None, "status": "idle"})
 
 
 class TaskSummarySchema(BaseModel):
@@ -46,8 +46,8 @@ class TaskSummarySchema(BaseModel):
     pid: Optional[int] = Field(None, description="프로세스 종료 시 null")
 
     model_config = _example({
-        "name": "cup_pyramid_web",
-        "command": "ros2 launch cup_stack cup_pyramid_web.launch.py",
+        "name": "gripper",
+        "command": "ros2 launch cup_stack gripper.launch.py",
         "status": "running",
         "pid": 12345,
     })
@@ -84,11 +84,11 @@ class RobotStatusResponse(BaseModel):
             "velocity": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
             "effort": [0.12, 1.84, 0.95, 0.05, 0.21, 0.0],
         },
-        "task": {"name": "cup_pyramid_web", "status": "running"},
+        "task": {"name": None, "status": "idle"},
         "bringup": {"name": "bringup_sim", "status": "running"},
         "tasks": [{
-            "name": "cup_pyramid_web",
-            "command": "ros2 launch cup_stack cup_pyramid_web.launch.py",
+            "name": "gripper",
+            "command": "ros2 launch cup_stack gripper.launch.py",
             "status": "running",
             "pid": 12345,
         }],
@@ -128,13 +128,13 @@ class TaskStartRequest(BaseModel):
         description="launch 파일에 전달할 인자 (key:=value 형식으로 변환됨)",
     )
 
-    model_config = _example({"task": "cup_pyramid_web", "args": {}})
+    model_config = _example({"task": "gripper", "args": {}})
 
 
 class TaskStopRequest(BaseModel):
     name: str = Field(..., description="중지할 태스크 이름")
 
-    model_config = _example({"name": "cup_pyramid_web"})
+    model_config = _example({"name": "gripper"})
 
 
 class TaskStartedResponse(BaseModel):
@@ -143,7 +143,7 @@ class TaskStartedResponse(BaseModel):
     pid: Optional[int] = None
 
     model_config = _example({
-        "name": "cup_pyramid_web", "status": "running", "pid": 12345,
+        "name": "gripper", "status": "running", "pid": 12345,
     })
 
 
@@ -151,7 +151,7 @@ class TaskStoppedResponse(BaseModel):
     name: str
     status: str
 
-    model_config = _example({"name": "cup_pyramid_web", "status": "stopped"})
+    model_config = _example({"name": "gripper", "status": "stopped"})
 
 
 class TaskLogResponse(BaseModel):
@@ -159,11 +159,11 @@ class TaskLogResponse(BaseModel):
     log: list[str]
 
     model_config = _example({
-        "name": "cup_pyramid_web",
+        "name": "gripper",
         "log": [
             "[INFO] [launch]: process started",
-            "[INFO] [cup_pyramid]: picking cup_0",
-            "[INFO] [cup_pyramid]: placed cup_0",
+            "[INFO] [gripper]: opening",
+            "[INFO] [gripper]: opened",
         ],
     })
 
@@ -263,13 +263,6 @@ class CupDetectionFrame(BaseModel):
     })
 
 
-class CupTriggerRequest(BaseModel):
-    cup_id: str = Field(..., description="감지 결과의 cups[].id 값")
-    task: str = Field(..., description="cup_pyramid_web 또는 cup_unstack_web")
-
-    model_config = _example({"cup_id": "cup_0", "task": "cup_pyramid_web"})
-
-
 # ── Calibration ───────────────────────────────────────────────────────────────
 
 class CalibrationResponse(BaseModel):
@@ -340,6 +333,95 @@ class PickSkillResponse(BaseModel):
 
     model_config = _example({
         "success": True, "skill": "pick", "detail": "gripper_z=0.1500",
+    })
+
+
+# ── Pyramid Skill ─────────────────────────────────────────────────────────────
+
+PyramidSlotKey = Literal["1l", "1m", "1r", "2l", "2r", "3m"]
+
+
+class PyramidConfigCenter(BaseModel):
+    x: float = Field(..., description="피라미드 중심 X (base_link, m)")
+    y: float = Field(..., description="피라미드 중심 Y (base_link, m)")
+
+    model_config = _example({"x": 0.50, "y": 0.00})
+
+
+class PyramidSlotXYZ(BaseModel):
+    x: float
+    y: float
+    z: float
+
+    model_config = _example({"x": 0.50, "y": 0.00, "z": 0.323})
+
+
+class PyramidConfigResponse(BaseModel):
+    """3-2-1 피라미드 설정 + 6개 슬롯의 절대 place 좌표 캐시."""
+
+    center: PyramidConfigCenter
+    degree: float = Field(..., description="행 방향 yaw (deg, [0, 360)). +x 기준 반시계")
+    pick_z: float = Field(..., description="그리퍼 pick Z (base_link, m)")
+    slots: dict[str, PyramidSlotXYZ] = Field(
+        ..., description="키: 1l/1m/1r/2l/2r/3m, 값: place 절대 좌표"
+    )
+
+    model_config = _example({
+        "center": {"x": 0.50, "y": 0.00},
+        "degree": 90.0,
+        "pick_z": 0.313,
+        "slots": {
+            "1l": {"x": 0.50, "y": -0.079, "z": 0.323},
+            "1m": {"x": 0.50, "y":  0.000, "z": 0.323},
+            "1r": {"x": 0.50, "y":  0.079, "z": 0.323},
+            "2l": {"x": 0.50, "y": -0.0395, "z": 0.418},
+            "2r": {"x": 0.50, "y":  0.0395, "z": 0.418},
+            "3m": {"x": 0.50, "y":  0.000, "z": 0.513},
+        },
+    })
+
+
+class PyramidConfigUpdate(BaseModel):
+    """POST /api/robot/config/pyramid 본문. 지정한 필드만 갱신."""
+
+    center: Optional[PyramidConfigCenter] = Field(
+        None, description="피라미드 중심 XY (생략 시 기존값 유지)"
+    )
+    degree: Optional[float] = Field(
+        None, description="행 방향 yaw (deg, 입력값은 % 360 wrap)"
+    )
+    pick_z: Optional[float] = Field(
+        None, description="그리퍼 pick Z (base_link, m)"
+    )
+
+    model_config = _example({"degree": 45.0})
+
+
+class PyramidSkillRequest(BaseModel):
+    """POST /api/robot/skill/pyramid 본문. pick XY + 놓을 slot 키만 받음.
+
+    피라미드 중심·yaw·pick_z 는 /api/robot/config/pyramid 에 저장된 값을
+    서버가 자동 주입하므로 본문에 포함하지 않는다.
+    """
+
+    x: float = Field(..., description="pick 컵 윗면 중앙 X (base_link, m)")
+    y: float = Field(..., description="pick 컵 윗면 중앙 Y (base_link, m)")
+    slot: PyramidSlotKey = Field(
+        ..., description="놓을 슬롯 키: 1l/1m/1r (bottom), 2l/2r (mid), 3m (top)"
+    )
+
+    model_config = _example({"x": 0.40, "y": 0.10, "slot": "1l"})
+
+
+class PyramidSkillResponse(BaseModel):
+    success: bool
+    skill: str = "pyramid"
+    detail: str = ""
+
+    model_config = _example({
+        "success": True,
+        "skill": "pyramid",
+        "detail": "slot=1l pick=(0.40,0.10,0.313) place=(0.50,-0.079,0.323)",
     })
 
 

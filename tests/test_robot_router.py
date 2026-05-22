@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -68,51 +68,6 @@ class TestCupsEndpoint:
         assert data["cups"][0]["id"] == "cup_0"
 
 
-class TestCupsTriggerEndpoint:
-    def test_trigger_invalid_task(self, client: TestClient, cup_detection_domain: CupDetectionDomain):
-        resp = client.post("/api/robot/cups/trigger", json={"cup_id": "cup_0", "task": "cup_pyramid"})
-        assert resp.status_code == 400
-        assert "task must be one of" in resp.json()["detail"]
-
-    def test_trigger_detection_not_running(self, client: TestClient, cup_detection_domain: CupDetectionDomain):
-        cup_detection_domain._launcher._tasks = {}
-        resp = client.post("/api/robot/cups/trigger", json={"cup_id": "cup_0", "task": "cup_pyramid_web"})
-        assert resp.status_code == 503
-
-    def test_trigger_cup_not_found(self, client: TestClient, cup_detection_domain: CupDetectionDomain):
-        from server.ros.launch import TaskStatus, RunningTask
-        task = _make_running_task("cup_detection")
-        cup_detection_domain._launcher._tasks = {"cup_detection": task}
-        resp = client.post("/api/robot/cups/trigger", json={"cup_id": "cup_99", "task": "cup_pyramid_web"})
-        assert resp.status_code == 404
-
-    def test_trigger_success(self, client: TestClient, cup_detection_domain: CupDetectionDomain):
-        task = _make_running_task("cup_detection")
-        cup_detection_domain._launcher._tasks = {"cup_detection": task}
-        cup_detection_domain._on_cup_poses({
-            "header": {"stamp": {"sec": 1000, "nanosec": 0}, "frame_id": "base_link"},
-            "poses": [{
-                "cup_id": "cup_0",
-                "label": "cup",
-                "confidence": 0.9,
-                "position": {"x": 0.3, "y": 0.0, "z": 0.3},
-                "cx": 320.0,
-                "cy": 240.0,
-                "bbox": [300, 220, 340, 260],
-                "pose_valid": True,
-            }],
-        })
-
-        started = _make_running_task("cup_pyramid_web")
-        cup_detection_domain._launcher.start = AsyncMock(return_value=started)
-
-        resp = client.post("/api/robot/cups/trigger", json={"cup_id": "cup_0", "task": "cup_pyramid_web"})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["name"] == "cup_pyramid_web"
-        assert data["status"] == "running"
-
-
 class TestRobotStatusEndpoint:
     def test_get_status(self, client: TestClient, robot_domain: RobotDomain):
         resp = client.get("/api/robot/status")
@@ -130,5 +85,5 @@ class TestTaskLogEndpoint:
         assert resp.status_code == 400
 
     def test_tail_out_of_range(self, client: TestClient):
-        resp = client.get("/api/robot/task/log?name=cup_pyramid_web&tail=1000")
+        resp = client.get("/api/robot/task/log?name=gripper&tail=1000")
         assert resp.status_code == 400

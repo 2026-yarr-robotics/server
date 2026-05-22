@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import logging
+import math
 import time
 import urllib.error
 import urllib.request
@@ -35,6 +36,22 @@ GRIPPER_WIDTH_STALE_SEC = 2.0
 SKILL_API_COMMAND = "skill_api"
 SKILL_API_READY_TIMEOUT = 90.0   # seconds to wait for /status ready=true
 SKILL_API_POLL_INTERVAL = 2.0    # seconds between readiness probes
+
+# 3-2-1 pyramid geometry (matches cup_stack.skills.config.SkillStackConfig).
+# Slot layout — lateral offset (m) and vertical layer (0=bottom, 2=top).
+PYRAMID_CUP_SPACING = 0.079
+PYRAMID_LAYER_HEIGHT = 0.095
+PYRAMID_PLACE_Z_BASE = 0.323
+DEFAULT_PYRAMID_DEGREE = 90.0
+DEFAULT_PYRAMID_PICK_Z = 0.313  # SkillStackConfig.pick_z_base
+PYRAMID_SLOT_OFFSETS: dict[str, tuple[float, int]] = {
+    "1l": (-PYRAMID_CUP_SPACING,      0),
+    "1m": (0.0,                       0),
+    "1r": ( PYRAMID_CUP_SPACING,      0),
+    "2l": (-PYRAMID_CUP_SPACING / 2,  1),
+    "2r": ( PYRAMID_CUP_SPACING / 2,  1),
+    "3m": (0.0,                       2),
+}
 
 
 @dataclass
@@ -105,6 +122,14 @@ class RobotDomain:
             z_max=workspace_limits.z_max if workspace_limits else 0.55,
             grid_spacing=workspace_limits.grid_spacing if workspace_limits else 0.05,
         )
+
+        # 3-2-1 pyramid config: center XY (None ⇒ initialized from HOME EE on
+        # first read), degree (yaw, +x axis CCW), pick gripper Z, and the
+        # cached 6-slot absolute place coordinates.
+        self._pyramid_center: dict[str, float] | None = None
+        self._pyramid_degree: float = DEFAULT_PYRAMID_DEGREE
+        self._pyramid_pick_z: float = DEFAULT_PYRAMID_PICK_Z
+        self._pyramid_slots: dict[str, dict[str, float]] = {}
 
     @property
     def move_limits(self) -> dict[str, Any]:
@@ -614,6 +639,168 @@ class RobotDomain:
                 ) from exc
 
         logger.info("pick_skill -> %s %s", url, payload)
+        return await loop.run_in_executor(None, _call)
+
+    # ── Pyramid config + skill ───────────────────────────────────────────────
+
+    def _ensure_pyramid_center(self) -> dict[str, float]:
+        """Return current pyramid center, lazy-initializing to HOME EE XY.
+
+        Raises ValueError when EE pose is not yet available — caller should
+        translate to HTTP 503.
+        """
+        if self._pyramid_center is None:
+            ee = self.get_ee_position()
+            if ee is None:
+                raise ValueError(
+                    "pyramid center not set and HOME EE pose is unavailable "
+                    "(is bringup running?)"
+                )
+            self._pyramid_center = {"x": float(ee["x"]), "y": float(ee["y"])}
+            self._recompute_slots()
+        return self._pyramid_center
+
+    def _recompute_slots(self) -> None:
+        """Recompute the 6 absolute slot XYZ from (center, degree)."""
+        if self._pyramid_center is None:
+            self._pyramid_slots = {}
+            return
+        cx = self._pyramid_center["x"]
+        cy = self._pyramid_center["y"]
+        rad = math.radians(self._pyramid_degree)
+        ux, uy = math.cos(rad), math.sin(rad)
+        slots: dict[str, dict[str, float]] = {}
+        for key, (lat, layer) in PYRAMID_SLOT_OFFSETS.items():
+            slots[key] = {
+                "x": cx + lat * ux,
+                "y": cy + lat * uy,
+                "z": PYRAMID_PLACE_Z_BASE + layer * PYRAMID_LAYER_HEIGHT,
+            }
+        self._pyramid_slots = slots
+
+    def _validate_slot_z_bounds(self) -> None:
+        """Reject when any slot Z exceeds workspace z_max."""
+        if not self._pyramid_slots:
+            return
+        max_z = max(s["z"] for s in self._pyramid_slots.values())
+        if max_z > self._move_limits.z_max:
+            raise ValueError(
+                f"top slot z={max_z:.3f} exceeds workspace z_max="
+                f"{self._move_limits.z_max:.3f}"
+            )
+
+    def get_pyramid_config(self) -> dict[str, Any]:
+        self._ensure_pyramid_center()
+        return {
+            "center": dict(self._pyramid_center),
+            "degree": self._pyramid_degree,
+            "pick_z": self._pyramid_pick_z,
+            "slots": {k: dict(v) for k, v in self._pyramid_slots.items()},
+        }
+
+    def set_pyramid_config(
+        self,
+        center: dict[str, float] | None = None,
+        degree: float | None = None,
+        pick_z: float | None = None,
+    ) -> dict[str, Any]:
+        """Update pyramid config; recompute slots; validate z bounds."""
+        # Initialize center from HOME if still unset and not provided.
+        if center is None and self._pyramid_center is None:
+            self._ensure_pyramid_center()
+
+        if center is not None:
+            cx, cy = float(center["x"]), float(center["y"])
+            if not (self._move_limits.x_min <= cx <= self._move_limits.x_max
+                    and self._move_limits.y_min <= cy <= self._move_limits.y_max):
+                raise ValueError(
+                    f"center ({cx:.3f},{cy:.3f}) outside workspace XY limits"
+                )
+            self._pyramid_center = {"x": cx, "y": cy}
+
+        if degree is not None:
+            self._pyramid_degree = float(degree) % 360.0
+
+        if pick_z is not None:
+            pz = float(pick_z)
+            if not (self._move_limits.z_min <= pz <= self._move_limits.z_max):
+                raise ValueError(
+                    f"pick_z={pz:.3f} outside workspace Z limits "
+                    f"[{self._move_limits.z_min:.3f},{self._move_limits.z_max:.3f}]"
+                )
+            self._pyramid_pick_z = pz
+
+        self._recompute_slots()
+        self._validate_slot_z_bounds()
+        return self.get_pyramid_config()
+
+    async def pyramid_skill(
+        self,
+        x: float,
+        y: float,
+        slot: str,
+    ) -> dict[str, Any]:
+        """Proxy a single pyramid pick-and-place to ROS 2 skill_api_node.
+
+        Pulls (center, degree, pick_z) from the in-memory pyramid config
+        and forwards both the pick (x,y,pick_z) and the absolute place
+        (from the cached slot table) to /skill/pyramid_step.
+
+        Raises:
+            ValueError: invalid slot key, pick XY outside workspace, or
+                pyramid center unavailable.
+            ConnectionError: skill_api_node unreachable / not ready.
+            RuntimeError: skill_api_node returned an HTTP error.
+        """
+        if slot not in PYRAMID_SLOT_OFFSETS:
+            raise ValueError(
+                f"invalid slot '{slot}'; expected one of "
+                f"{sorted(PYRAMID_SLOT_OFFSETS)}"
+            )
+        if not (self._move_limits.x_min <= x <= self._move_limits.x_max
+                and self._move_limits.y_min <= y <= self._move_limits.y_max):
+            raise ValueError(
+                f"pick ({x:.3f},{y:.3f}) outside workspace XY limits"
+            )
+
+        self._ensure_pyramid_center()
+        place = self._pyramid_slots[slot]
+
+        await self._ensure_skill_api()
+
+        payload = {
+            "x": float(x),
+            "y": float(y),
+            "pick_z": self._pyramid_pick_z,
+            "place_x": place["x"],
+            "place_y": place["y"],
+            "place_z": place["z"],
+            "slot": slot,
+        }
+
+        url = f"{self._skill_api_url}/skill/pyramid_step"
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        loop = asyncio.get_running_loop()
+
+        def _call() -> dict[str, Any]:
+            try:
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode(errors="replace")
+                raise RuntimeError(f"{exc.code}: {body}") from exc
+            except urllib.error.URLError as exc:
+                raise ConnectionError(
+                    f"skill_api_node unreachable at {self._skill_api_url}: "
+                    f"{exc.reason}"
+                ) from exc
+
+        logger.info("pyramid_skill -> %s %s", url, payload)
         return await loop.run_in_executor(None, _call)
 
 

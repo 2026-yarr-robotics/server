@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
-from server.domains.cup_detection import CupDetectionDomain, WEB_TASK_COMMANDS
+from server.domains.cup_detection import CupDetectionDomain
 from server.ros.launch import RunningTask, TaskStatus
 
 
@@ -119,46 +119,3 @@ class TestCupDetectionDomain:
         task.status = TaskStatus.IDLE
         cup_detection_domain._launcher._tasks = {"cup_detection": task}
         assert cup_detection_domain.is_running() is False
-
-    @pytest.mark.asyncio
-    async def test_trigger_task_invalid_task(self, cup_detection_domain: CupDetectionDomain):
-        with pytest.raises(ValueError, match="task must be one of"):
-            await cup_detection_domain.trigger_task("cup_0", "cup_pyramid")
-
-    @pytest.mark.asyncio
-    async def test_trigger_task_detection_not_running(self, cup_detection_domain: CupDetectionDomain):
-        cup_detection_domain._launcher._tasks = {}
-        with pytest.raises(RuntimeError, match="cup_detection task is not running"):
-            await cup_detection_domain.trigger_task("cup_0", "cup_pyramid_web")
-
-    @pytest.mark.asyncio
-    async def test_trigger_task_cup_not_found(self, cup_detection_domain: CupDetectionDomain):
-        task = _make_running_task("cup_detection")
-        cup_detection_domain._launcher._tasks = {"cup_detection": task}
-        cup_detection_domain._on_cup_poses(_cup_poses_msg())
-        with pytest.raises(KeyError, match="cup_99"):
-            await cup_detection_domain.trigger_task("cup_99", "cup_pyramid_web")
-
-    @pytest.mark.asyncio
-    async def test_trigger_task_success(self, cup_detection_domain: CupDetectionDomain):
-        task = _make_running_task("cup_detection")
-        cup_detection_domain._launcher._tasks = {"cup_detection": task}
-        cup_detection_domain._on_cup_poses(_cup_poses_msg())
-
-        started = _make_running_task("cup_pyramid_web")
-        cup_detection_domain._launcher.start = AsyncMock(return_value=started)
-
-        result = await cup_detection_domain.trigger_task("cup_0", "cup_pyramid_web")
-        assert result["name"] == "cup_pyramid_web"
-        assert result["status"] == "running"
-
-        cup_detection_domain._launcher.start.assert_called_once_with(
-            "cup_pyramid_web",
-            {"pixel_x": "320", "pixel_y": "240"},
-        )
-
-
-def test_web_task_commands_set():
-    assert "cup_pyramid_web" in WEB_TASK_COMMANDS
-    assert "cup_unstack_web" in WEB_TASK_COMMANDS
-    assert "cup_pyramid" not in WEB_TASK_COMMANDS
