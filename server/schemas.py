@@ -425,6 +425,25 @@ class PyramidSkillResponse(BaseModel):
     })
 
 
+# ── Scan Skill ────────────────────────────────────────────────────────────────
+
+class ScanSkillResponse(BaseModel):
+    """Response for POST /api/robot/skill/scan.
+
+    스캔은 인자가 없는 단일 스킬이라 별도의 Request 모델은 없다. ROS 2
+    skill_api_node 의 ``ScanSkill`` 이 ``scan.launch.py`` 를 실행하여 양쪽
+    두 방향(pos1, pos2) 을 거쳐 초기 위치로 복귀한다.
+    """
+
+    success: bool
+    skill: str = "scan"
+    detail: str = ""
+
+    model_config = _example({
+        "success": True, "skill": "scan", "detail": "",
+    })
+
+
 # ── Pixel → World ──────────────────────────────────────────────────────────────
 
 class PixelToWorldResponse(BaseModel):

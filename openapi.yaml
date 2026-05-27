@@ -371,6 +371,40 @@ paths:
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
+  /api/robot/skill/scan:
+    post:
+      tags: [robot]
+      summary: 스캔 스킬 (양쪽 두 방향 후 초기 위치 복귀)
+      description: |
+        ROS 2 `skill_api_node` 의 `ScanSkill` 을 프록시한다.
+        `scan.launch.py` 가 PTP 로 `초기 위치 → pos1 → pos2 → 초기 위치` 순으로
+        이동하며 각 웨이포인트 도달 후 `dwell_sec`(기본 5초) 만큼 대기한다.
+        인자가 없는 단일 스킬이므로 본문은 비어 있다.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+            example: {}
+      responses:
+        "200":
+          description: 스킬 실행 결과
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScanSkillResponse"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "502":
+          description: skill_api_node 가 HTTP 에러 반환
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorDetail"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
+
   /api/robot/cups:
     get:
       tags: [robot]
@@ -1113,6 +1147,16 @@ components:
       properties:
         success: { type: boolean }
         skill: { type: string, example: pyramid }
+        detail: { type: string }
+
+    # ── Scan Skill ──
+
+    ScanSkillResponse:
+      type: object
+      required: [success, skill]
+      properties:
+        success: { type: boolean }
+        skill: { type: string, example: scan }
         detail: { type: string }
 
     # ── Error ──

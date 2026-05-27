@@ -803,6 +803,46 @@ class RobotDomain:
         logger.info("pyramid_skill -> %s %s", url, payload)
         return await loop.run_in_executor(None, _call)
 
+    # ── Scan skill ───────────────────────────────────────────────────────────
+
+    async def scan_skill(self) -> dict[str, Any]:
+        """Proxy the scan skill to ROS 2 skill_api_node.
+
+        Scan 은 인자가 없는 단일 스킬이라 본문이 비어 있다. ROS 2 측에서
+        pos1 → pos2 → 초기 위치 순으로 PTP 이동하며 각 웨이포인트에서
+        dwell 만큼 대기한다.
+
+        Raises:
+            ConnectionError: skill_api_node unreachable / not ready.
+            RuntimeError: skill_api_node returned an HTTP error.
+        """
+        await self._ensure_skill_api()
+
+        url = f"{self._skill_api_url}/skill/scan"
+        req = urllib.request.Request(
+            url,
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        loop = asyncio.get_running_loop()
+
+        def _call() -> dict[str, Any]:
+            try:
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode(errors="replace")
+                raise RuntimeError(f"{exc.code}: {body}") from exc
+            except urllib.error.URLError as exc:
+                raise ConnectionError(
+                    f"skill_api_node unreachable at {self._skill_api_url}: "
+                    f"{exc.reason}"
+                ) from exc
+
+        logger.info("scan_skill -> %s", url)
+        return await loop.run_in_executor(None, _call)
+
 
 def _quat_to_matrix(
     qx: float, qy: float, qz: float, qw: float,

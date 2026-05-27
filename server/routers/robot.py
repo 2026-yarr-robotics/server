@@ -23,6 +23,7 @@ from ..schemas import (
     PyramidSkillRequest,
     PyramidSkillResponse,
     RobotStatusResponse,
+    ScanSkillResponse,
     TaskLogResponse,
     TaskStartedResponse,
     TaskStartRequest,
@@ -243,6 +244,25 @@ async def skill_pyramid(body: PyramidSkillRequest) -> dict:
         return await domain.pyramid_skill(body.x, body.y, body.slot)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except RuntimeError as e:
+        msg = str(e)
+        status = 409 if msg.startswith("409") else 502
+        raise HTTPException(status_code=status, detail=msg)
+
+
+@router.post("/skill/scan", response_model=ScanSkillResponse)
+async def skill_scan() -> dict:
+    """양쪽 두 방향(pos1, pos2) 스캔 후 초기 위치로 복귀.
+
+    인자 없음. ROS 2 skill_api_node 의 ScanSkill 이 scan.launch.py 를
+    실행해 PTP 로 pos1 → pos2 → 초기 위치 순으로 이동하며 각 웨이포인트
+    도달 후 dwell_sec 만큼 대기한다.
+    """
+    domain = _get_domain()
+    try:
+        return await domain.scan_skill()
     except ConnectionError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except RuntimeError as e:
