@@ -29,6 +29,15 @@ sleep 1
 
 echo "[REAL] DSR M0609 Bringup 시작 (mode=real, host=${ROBOT_IP})"
 
+# dsr_bringup2_rviz.launch.py only spawns joint_state_broadcaster + dsr_controller2.
+# MoveIt needs dsr_moveit_controller (JTC) too; skill_api.launch.py normally
+# spawns it, but if skill_api_node is already running from an earlier session,
+# restarting bringup leaves the JTC unspawned and every pick aborts at step 1
+# with "Action client not connected". Spawner polls for the controller_manager
+# service and self-exits on activation, so it's safe to background here.
+( ros2 run controller_manager spawner dsr_moveit_controller \
+    --controller-manager /dsr01/controller_manager ) &
+
 ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py \
     model:=m0609 \
     mode:=real \
