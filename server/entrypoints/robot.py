@@ -10,6 +10,7 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+from ..access_log import APIAccessLogMiddleware
 from ..config import AppSettings
 from ..domains.cup_detection import CupDetectionDomain
 from ..domains.robot import RobotDomain
@@ -121,6 +122,7 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(APIAccessLogMiddleware)
 
     app.include_router(robot_router)
 
