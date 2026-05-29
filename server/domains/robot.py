@@ -280,8 +280,25 @@ class RobotDomain:
         }
 
     async def stop_task(self, name: str) -> dict[str, Any]:
+        ros_stop_success = await self._stop_motion()
         await self._launcher.stop(name)
-        return {"name": name, "status": "stopped"}
+        return {"name": name, "status": "stopped", "ros_stop_success": ros_stop_success}
+
+    async def _stop_motion(self) -> bool:
+        """Best-effort: Doosan 컨트롤러에 퀵스탑 명령을 보낸다."""
+        if not self._bridge.connected:
+            return False
+        try:
+            await self._bridge.call_service(
+                "/motion/stop_motion",
+                "dsr_msgs2/srv/StopMotion",
+                {"stop_mode": 1},
+                timeout=2.0,
+            )
+            return True
+        except Exception as exc:
+            logger.warning("stop_motion service call failed: %s", exc)
+            return False
 
     def get_ee_position(self) -> dict[str, float] | None:
         ts = self._ee_pos_ros_ts

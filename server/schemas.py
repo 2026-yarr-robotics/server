@@ -150,6 +150,7 @@ class TaskStartedResponse(BaseModel):
 class TaskStoppedResponse(BaseModel):
     name: str
     status: str
+    ros_stop_success: bool = False
 
     model_config = _example({"name": "gripper", "status": "stopped"})
 
