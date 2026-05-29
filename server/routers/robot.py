@@ -24,6 +24,7 @@ from ..schemas import (
     PyramidSkillResponse,
     RobotStatusResponse,
     ScanSkillResponse,
+    ScanSquareSkillResponse,
     TaskLogResponse,
     TaskStartedResponse,
     TaskStartRequest,
@@ -263,6 +264,25 @@ async def skill_scan() -> dict:
     domain = _get_domain()
     try:
         return await domain.scan_skill()
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except RuntimeError as e:
+        msg = str(e)
+        status = 409 if msg.startswith("409") else 502
+        raise HTTPException(status_code=status, detail=msg)
+
+
+@router.post("/skill/scan_square", response_model=ScanSquareSkillResponse)
+async def skill_scan_square() -> dict:
+    """카메라 하향 고정, base_link XY 사각형 4 꼭짓점 순회 후 시작 위치 복귀.
+
+    인자 없음. ROS 2 skill_api_node 의 ScanSkill 이 scan_square.launch.py 를
+    실행해 HOME EE 높이에서 사각형 둘레(꼭짓점1→2→3→4→1)를 그린 뒤 초기
+    joint 자세로 복귀한다. 각 꼭짓점 도달 후 dwell_sec 만큼 대기한다.
+    """
+    domain = _get_domain()
+    try:
+        return await domain.scan_square_skill()
     except ConnectionError as e:
         raise HTTPException(status_code=503, detail=str(e))
     except RuntimeError as e:

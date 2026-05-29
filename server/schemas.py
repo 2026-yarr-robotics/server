@@ -445,6 +445,24 @@ class ScanSkillResponse(BaseModel):
     })
 
 
+class ScanSquareSkillResponse(BaseModel):
+    """Response for POST /api/robot/skill/scan_square.
+
+    인자 없는 단일 스킬. ROS 2 skill_api_node 의 ``ScanSkill`` 이
+    ``scan_square.launch.py`` 를 실행하여 카메라를 하향 고정한 채 base_link
+    XY 평면의 사각형 네 꼭짓점을 (HOME EE 높이에서) 순회한 뒤 시작 위치로
+    복귀한다.
+    """
+
+    success: bool
+    skill: str = "scan_square"
+    detail: str = ""
+
+    model_config = _example({
+        "success": True, "skill": "scan_square", "detail": "",
+    })
+
+
 # ── Pixel → World ──────────────────────────────────────────────────────────────
 
 class PixelToWorldResponse(BaseModel):

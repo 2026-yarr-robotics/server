@@ -860,6 +860,44 @@ class RobotDomain:
         logger.info("scan_skill -> %s", url)
         return await loop.run_in_executor(None, _call)
 
+    async def scan_square_skill(self) -> dict[str, Any]:
+        """Proxy the 4-corner square scan skill to ROS 2 skill_api_node.
+
+        2방향 scan 과 달리 카메라를 하향 고정한 채 base_link XY 평면의
+        사각형 네 꼭짓점을 HOME EE 높이에서 순회한 뒤 시작 위치로 복귀한다.
+        인자 없는 단일 스킬이라 본문이 비어 있다.
+
+        Raises:
+            ConnectionError: skill_api_node unreachable / not ready.
+            RuntimeError: skill_api_node returned an HTTP error.
+        """
+        await self._ensure_skill_api()
+
+        url = f"{self._skill_api_url}/skill/scan_square"
+        req = urllib.request.Request(
+            url,
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        loop = asyncio.get_running_loop()
+
+        def _call() -> dict[str, Any]:
+            try:
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.HTTPError as exc:
+                body = exc.read().decode(errors="replace")
+                raise RuntimeError(f"{exc.code}: {body}") from exc
+            except urllib.error.URLError as exc:
+                raise ConnectionError(
+                    f"skill_api_node unreachable at {self._skill_api_url}: "
+                    f"{exc.reason}"
+                ) from exc
+
+        logger.info("scan_square_skill -> %s", url)
+        return await loop.run_in_executor(None, _call)
+
 
 def _quat_to_matrix(
     qx: float, qy: float, qz: float, qw: float,
