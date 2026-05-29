@@ -1,7 +1,7 @@
 #!/bin/bash
 # DSR M0609 MoveIt Bringup - 실제 로봇 모드 (real) — "31" 머신 전용
 # 사용법: ./bringup_real_31.sh [로봇IP]
-# 예시:   ./bringup_real_31.sh 192.168.1.100
+# 예시:   ./bringup_real_31.sh 192.168.137.100
 #
 # bringup_real.sh 의 실행 경로 오류 수정본.
 #   기존 스크립트는 $HOME/ws_moveit, $HOME/ros2_ws, $HOME/install 만 source 했는데
@@ -10,7 +10,10 @@
 #   프로젝트 버전의 doosan-robot2(dsr_bringup2/dsr_controller2/dsr_msgs2 등)가
 #   로드되지 않았다. 아래처럼 스크립트 위치 기준으로 프로젝트 오버레이를 source 한다.
 
-ROBOT_IP=${1:-192.168.1.100}
+# 이 "31" 머신은 로봇을 USB 이더넷(enxec9a0c17dc1f, 192.168.137.50/24)에 물려 쓴다.
+# 로봇은 같은 대역의 192.168.137.100 (DRFL :12345). 192.168.1.100 은 이 머신에
+# 해당 대역 인터페이스가 없어 WAN 게이트웨이로 새어나가 연결이 타임아웃된다.
+ROBOT_IP=${1:-192.168.137.100}
 
 # 스크립트 실제 위치 — $HOME 하드코딩 대신 여기서부터 경로를 계산한다.
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
