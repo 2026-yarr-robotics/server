@@ -55,13 +55,13 @@ CUP_STACK_SETUP="$SCRIPT_DIR/../ros2-cup-stack/ros2/install/setup.bash"
 # launch 는 ros2-recode-sequence 의 cameras_only.launch.py 를 그대로
 # 가져온 hard copy. cameras.yaml 경로를 recode_sequence share 에서
 # 찾으므로 그 워크스페이스도 함께 source 한다.
-RECODE_SETUP="$HOME/Projects/ros2-recode-sequence/install/setup.bash"
+RECODE_SETUP="$SCRIPT_DIR/../yarr-robust-speed-stack/ros2-recode-sequence/install/setup.bash"
 tmux send-keys -t "$SESSION:cam-exo" \
-    "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch cup_stack cameras_only.launch.py view:=exo" Enter
+    "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=exo" Enter
 
 tmux new-window -t "$SESSION" -n "cam-hand"
 tmux send-keys -t "$SESSION:cam-hand" \
-    "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch cup_stack cameras_only.launch.py view:=hand" Enter
+    "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=hand" Enter
 
 # ── 창 2: bringup 에이전트 (포트 8099) ────────────────────
 tmux new-window -t "$SESSION" -n "bringup-agent"
