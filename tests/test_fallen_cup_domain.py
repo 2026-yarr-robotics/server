@@ -60,6 +60,16 @@ def _cups_grasp_poses_msg() -> dict:
     }
 
 
+def _cups_grasp_poses_msg_rosbridge_null() -> dict:
+    """rosbridge는 NaN을 JSON null(None)로 직렬화한다 — 실환경 메시지 형태."""
+    return {
+        "poses": [
+            {"position": {"x": 0.012, "y": -0.034, "z": 0.41}},
+            {"position": {"x": None, "y": None, "z": None}},  # NaN → null
+        ],
+    }
+
+
 class TestFallenCupDomain:
     def test_initial_state(self, fallen_cup_domain: FallenCupDomain):
         state = fallen_cup_domain.get_state()
@@ -112,6 +122,27 @@ class TestFallenCupDomain:
         assert state["cups"][0]["position"]["z"] == pytest.approx(0.41)
         # NaN depth → position None
         assert state["cups"][1]["position"] is None
+
+    def test_cups_grasp_rosbridge_null_values(self, fallen_cup_domain: FallenCupDomain):
+        """rosbridge가 NaN을 null로 직렬화한 실제 메시지 형태 — float(None) 에러 회귀 방지."""
+        fallen_cup_domain._on_cups_grasp_poses(_cups_grasp_poses_msg_rosbridge_null())
+        fallen_cup_domain._on_cups_pose2d(_cups_pose2d_msg(2))
+        state = fallen_cup_domain.get_state()
+        assert state["count"] == 2
+        assert state["cups"][0]["position"]["x"] == pytest.approx(0.012)
+        assert state["cups"][1]["position"] is None  # null → None
+
+    def test_pose2d_with_null_values_ignored(self, fallen_cup_domain: FallenCupDomain):
+        msg = _pose2d_msg()
+        msg["data"][6] = None  # yaw가 NaN → null
+        fallen_cup_domain._on_pose2d(msg)
+        assert fallen_cup_domain.get_state()["pose2d"] is None
+
+    def test_grasp_pose_with_null_position_ignored(self, fallen_cup_domain: FallenCupDomain):
+        msg = _grasp_pose_msg()
+        msg["pose"]["position"]["z"] = None  # depth 실패 → null
+        fallen_cup_domain._on_grasp_pose(msg)
+        assert fallen_cup_domain.get_state()["grasp_pose"] is None
 
     def test_staleness_clears_data(self, fallen_cup_domain: FallenCupDomain, monkeypatch):
         fallen_cup_domain._on_pose2d(_pose2d_msg())

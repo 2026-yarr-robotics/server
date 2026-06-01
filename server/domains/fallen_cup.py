@@ -31,6 +31,21 @@ _POSE2D_FIELDS = 12
 _CUPS_ROW_FIELDS = 13
 
 
+def _f(value: Any) -> float | None:
+    """Coerce a rosbridge JSON number to float.
+
+    rosbridge serializes NaN/Inf as ``null`` — return None for those (and for
+    anything non-numeric) instead of raising.
+    """
+    if value is None:
+        return None
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return None if math.isnan(f) else f
+
+
 class FallenCupDomain:
     """Subscribes to fallen-cup detection topics and tracks the latest state."""
 
@@ -84,18 +99,21 @@ class FallenCupDomain:
         logger.info("FallenCupDomain subscribed to /fallen_cup/* topics")
 
     def _on_pose2d(self, msg: dict[str, Any]) -> None:
-        data = msg.get("data", [])
-        if len(data) < _POSE2D_FIELDS:
+        raw = msg.get("data", [])
+        if len(raw) < _POSE2D_FIELDS:
             return
+        data = [_f(v) for v in raw[:_POSE2D_FIELDS]]
+        if any(v is None for v in data):
+            return  # NaN(→null) 포함 프레임은 무시
         self._pose2d = {
-            "top": {"x": float(data[0]), "y": float(data[1])},
-            "bottom": {"x": float(data[2]), "y": float(data[3])},
-            "direction": {"x": float(data[4]), "y": float(data[5])},
-            "yaw": float(data[6]),
-            "grip": {"x": float(data[7]), "y": float(data[8])},
-            "confidence": float(data[9]),
-            "top_width": float(data[10]),
-            "bottom_width": float(data[11]),
+            "top": {"x": data[0], "y": data[1]},
+            "bottom": {"x": data[2], "y": data[3]},
+            "direction": {"x": data[4], "y": data[5]},
+            "yaw": data[6],
+            "grip": {"x": data[7], "y": data[8]},
+            "confidence": data[9],
+            "top_width": data[10],
+            "bottom_width": data[11],
         }
         self._pose2d_ts = time.monotonic()
 
@@ -104,18 +122,18 @@ class FallenCupDomain:
         pose = msg.get("pose", {})
         pos = pose.get("position", {})
         ori = pose.get("orientation", {})
+        # rosbridge는 NaN을 null로 직렬화 — depth 실패 프레임은 무시
+        px, py, pz = _f(pos.get("x")), _f(pos.get("y")), _f(pos.get("z"))
+        if px is None or py is None or pz is None:
+            return
         self._grasp_pose = {
             "frame_id": header.get("frame_id", ""),
-            "position": {
-                "x": float(pos.get("x", 0.0)),
-                "y": float(pos.get("y", 0.0)),
-                "z": float(pos.get("z", 0.0)),
-            },
+            "position": {"x": px, "y": py, "z": pz},
             "orientation": {
-                "x": float(ori.get("x", 0.0)),
-                "y": float(ori.get("y", 0.0)),
-                "z": float(ori.get("z", 0.0)),
-                "w": float(ori.get("w", 1.0)),
+                "x": _f(ori.get("x")) or 0.0,
+                "y": _f(ori.get("y")) or 0.0,
+                "z": _f(ori.get("z")) or 0.0,
+                "w": _f(ori.get("w")) if _f(ori.get("w")) is not None else 1.0,
             },
         }
         self._grasp_pose_ts = time.monotonic()
@@ -125,12 +143,15 @@ class FallenCupDomain:
         n = len(data) // _CUPS_ROW_FIELDS
         cups = []
         for i in range(n):
-            row = data[i * _CUPS_ROW_FIELDS : (i + 1) * _CUPS_ROW_FIELDS]
+            row = [_f(v) for v in data[i * _CUPS_ROW_FIELDS : (i + 1) * _CUPS_ROW_FIELDS]]
+            # 핵심 필드(cup_id/yaw/grip/conf)에 NaN(→null)이 있으면 해당 row 스킵
+            if any(row[j] is None for j in (0, 7, 8, 9, 10)):
+                continue
             cups.append({
                 "cup_id": int(row[0]),
-                "yaw": float(row[7]),
-                "grip_pixel": {"x": float(row[8]), "y": float(row[9])},
-                "confidence": float(row[10]),
+                "yaw": row[7],
+                "grip_pixel": {"x": row[8], "y": row[9]},
+                "confidence": row[10],
                 "position": None,  # filled from cups_grasp_poses by index
             })
         # Join with the latest PoseArray by index (the node publishes both
@@ -145,15 +166,12 @@ class FallenCupDomain:
         positions: list[dict[str, float] | None] = []
         for pose in msg.get("poses", []):
             pos = pose.get("position", {})
-            x = float(pos.get("x", float("nan")))
-            if math.isnan(x):
+            # rosbridge는 NaN을 null로 직렬화 → depth 실패 cup은 None
+            x, y, z = _f(pos.get("x")), _f(pos.get("y")), _f(pos.get("z"))
+            if x is None or y is None or z is None:
                 positions.append(None)  # depth unavailable for this cup
             else:
-                positions.append({
-                    "x": x,
-                    "y": float(pos.get("y", 0.0)),
-                    "z": float(pos.get("z", 0.0)),
-                })
+                positions.append({"x": x, "y": y, "z": z})
         self._cups_grasp = positions
 
     # ── Queries ────────────────────────────────────────────────────────────────

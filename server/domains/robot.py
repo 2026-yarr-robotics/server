@@ -293,6 +293,8 @@ class RobotDomain:
         multi_cup: bool = False,
         dry_run: bool = False,
         sim: bool = False,
+        stand_cup_margin_m: float | None = None,
+        place_safe_z_min: float | None = None,
     ) -> dict[str, Any]:
         """넘어진 컵 세우기 태스크(fallen_cup_recovery launch)를 시작한다.
 
@@ -300,6 +302,9 @@ class RobotDomain:
         장기 실행 중인 skill_api(역시 MoveItPy 기반)와 컨트롤러 경합이 생긴다.
         시작 전에 skill_api 를 best-effort 로 정지시킨다 (다음 pick/pyramid
         호출 시 lazy 재시작됨).
+
+        ``stand_cup_margin_m``/``place_safe_z_min`` 은 place 단계의 Z 안전
+        파라미터 — 생략하면 launch 파일의 안전 기본값(+0.05 / 0.15)을 쓴다.
         """
         try:
             await self._launcher.stop(SKILL_API_COMMAND)
@@ -312,6 +317,10 @@ class RobotDomain:
             "dry_run": str(dry_run).lower(),
             "sim": str(sim).lower(),
         }
+        if stand_cup_margin_m is not None:
+            args["stand_cup_margin_m"] = str(stand_cup_margin_m)
+        if place_safe_z_min is not None:
+            args["place_safe_z_min"] = str(place_safe_z_min)
         return await self.start_task("fallen_cup_recovery", args)
 
     async def _stop_motion(self) -> bool:

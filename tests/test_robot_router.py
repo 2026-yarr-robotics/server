@@ -171,6 +171,29 @@ class TestFallenCupEndpoints:
         resp = client.post("/api/robot/fallen-cup/recovery", json={"mode": "throw"})
         assert resp.status_code == 422
 
+    def test_recovery_z_safety_params_forwarded(self, client: TestClient, mock_launcher):
+        """그리퍼-바닥 충돌 방지용 Z 안전 파라미터가 launch 인자로 전달되는지."""
+        mock_launcher.start.return_value = _make_running_task("fallen_cup_recovery")
+        resp = client.post(
+            "/api/robot/fallen-cup/recovery",
+            json={"mode": "place", "stand_cup_margin_m": 0.10, "place_safe_z_min": 0.20},
+        )
+        assert resp.status_code == 200
+        _, called_args = mock_launcher.start.call_args[0]
+        assert called_args["stand_cup_margin_m"] == "0.1"
+        assert called_args["place_safe_z_min"] == "0.2"
+
+    def test_recovery_z_safety_params_omitted_uses_launch_defaults(
+        self, client: TestClient, mock_launcher,
+    ):
+        mock_launcher.start.return_value = _make_running_task("fallen_cup_recovery")
+        resp = client.post("/api/robot/fallen-cup/recovery", json={"mode": "place"})
+        assert resp.status_code == 200
+        _, called_args = mock_launcher.start.call_args[0]
+        # 생략 시 launch 기본값 사용 → args에 포함하지 않음
+        assert "stand_cup_margin_m" not in called_args
+        assert "place_safe_z_min" not in called_args
+
     def test_recovery_conflict_returns_409(self, client: TestClient, mock_launcher):
         mock_launcher.start.side_effect = RuntimeError("Task 'x' is already running")
         resp = client.post("/api/robot/fallen-cup/recovery", json={"mode": "drop"})

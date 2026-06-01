@@ -296,6 +296,16 @@ class FallenCupRecoveryRequest(BaseModel):
     multi_cup: bool = Field(False, description="여러 fallen cup 순차 처리")
     dry_run: bool = Field(False, description="approach까지만 (gripper/descend/lift 스킵)")
     sim: bool = Field(False, description="카메라/그리퍼 HW 우회 (MoveIt virtual)")
+    stand_cup_margin_m: Optional[float] = Field(
+        None, ge=-0.05, le=0.30,
+        description="place 모드: 컵 바닥-테이블 여유 (m). 생략 시 launch 기본값(+0.05). "
+                    "값을 키우면 release 높이가 올라가 안전하지만 컵이 튕길 수 있음",
+    )
+    place_safe_z_min: Optional[float] = Field(
+        None, ge=0.05, le=0.40,
+        description="place 모드: flange 최저 안전 z (m). 생략 시 launch 기본값(0.15). "
+                    "그리퍼-바닥 충돌 방지 클램프",
+    )
 
     model_config = _example({"mode": "place", "multi_cup": False, "dry_run": False, "sim": False})
 

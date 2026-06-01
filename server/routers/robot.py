@@ -365,6 +365,8 @@ async def start_fallen_cup_recovery(body: FallenCupRecoveryRequest) -> dict:
             multi_cup=body.multi_cup,
             dry_run=body.dry_run,
             sim=body.sim,
+            stand_cup_margin_m=body.stand_cup_margin_m,
+            place_safe_z_min=body.place_safe_z_min,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
