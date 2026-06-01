@@ -264,6 +264,134 @@ class CupDetectionFrame(BaseModel):
     })
 
 
+# ── Fallen Cup ────────────────────────────────────────────────────────────────
+
+class FallenCupDetectionStartRequest(BaseModel):
+    """Body for POST /api/robot/fallen-cup/detection/start.
+
+    생략한 필드는 서버 설정(FallenCupConfig) 기본값을 사용한다.
+    """
+
+    conf: Optional[float] = Field(None, ge=0.0, le=1.0, description="YOLO confidence threshold")
+    imgsz: Optional[int] = Field(None, ge=64, description="YOLO 입력 크기")
+    use_depth: Optional[bool] = Field(None, description="depth로 3D grasp_pose 생성 여부")
+    weights_path: Optional[str] = Field(
+        None, description="YOLO weights(.pt) 절대경로. 생략 시 서버 설정/launch 기본값"
+    )
+
+    model_config = _example({"conf": 0.70, "imgsz": 1280, "use_depth": True})
+
+
+class FallenCupRecoveryRequest(BaseModel):
+    """Body for POST /api/robot/fallen-cup/recovery.
+
+    stand_fallen_cup 태스크(1회 실행)를 시작한다. 진행 상황은
+    ``/ws/task/log`` · ``/ws/robot/state`` 로 모니터링하고, 중지는
+    ``POST /api/robot/task/stop`` ``{"name": "fallen_cup_recovery"}`` 사용.
+    """
+
+    mode: Literal["drop", "place"] = Field(
+        "drop", description="lift 후 동작: drop(그 자리에 놓기) / place(옮겨 세우기)"
+    )
+    multi_cup: bool = Field(False, description="여러 fallen cup 순차 처리")
+    dry_run: bool = Field(False, description="approach까지만 (gripper/descend/lift 스킵)")
+    sim: bool = Field(False, description="카메라/그리퍼 HW 우회 (MoveIt virtual)")
+
+    model_config = _example({"mode": "place", "multi_cup": False, "dry_run": False, "sim": False})
+
+
+class FallenCupPixel(BaseModel):
+    x: float
+    y: float
+
+    model_config = _example({"x": 412.0, "y": 305.5})
+
+
+class FallenCupPose2D(BaseModel):
+    """단일 컵 2D 인식 결과 (/fallen_cup/pose2d)."""
+
+    top: FallenCupPixel
+    bottom: FallenCupPixel
+    direction: FallenCupPixel
+    yaw: float = Field(..., description="컵 방향 yaw (rad, 카메라 프레임)")
+    grip: FallenCupPixel
+    confidence: float
+    top_width: float
+    bottom_width: float
+
+    model_config = _example({
+        "top": {"x": 412.0, "y": 305.5},
+        "bottom": {"x": 520.0, "y": 310.0},
+        "direction": {"x": -0.99, "y": -0.04},
+        "yaw": 3.10,
+        "grip": {"x": 425.0, "y": 306.0},
+        "confidence": 0.91,
+        "top_width": 48.0,
+        "bottom_width": 72.0,
+    })
+
+
+class FallenCupGraspPose(BaseModel):
+    """3D grasp 좌표 (/fallen_cup/grasp_pose, 카메라 optical frame)."""
+
+    frame_id: str
+    position: EEPositionSchema
+    orientation: dict = Field(..., description="quaternion {x, y, z, w}")
+
+    model_config = _example({
+        "frame_id": "camera_color_optical_frame",
+        "position": {"x": 0.012, "y": -0.034, "z": 0.41},
+        "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+    })
+
+
+class FallenCupItem(BaseModel):
+    """multi-cup 인식 결과의 개별 컵."""
+
+    cup_id: int
+    yaw: float
+    grip_pixel: FallenCupPixel
+    confidence: float
+    position: Optional[EEPositionSchema] = Field(
+        None, description="카메라 optical frame 3D 좌표; depth 실패 시 null"
+    )
+
+    model_config = _example({
+        "cup_id": 0,
+        "yaw": 3.10,
+        "grip_pixel": {"x": 425.0, "y": 306.0},
+        "confidence": 0.91,
+        "position": {"x": 0.012, "y": -0.034, "z": 0.41},
+    })
+
+
+class FallenCupStateResponse(BaseModel):
+    """GET /api/robot/fallen-cup/state 응답.
+
+    인식 데이터는 2초 이상 갱신이 없으면 stale로 간주되어 null/[]로 내려간다.
+    """
+
+    detection_running: bool = Field(..., description="fallen_cup_detect 서비스 실행 여부")
+    count: int = Field(..., description="감지된 fallen cup 수 (multi-cup 토픽 기준)")
+    cups: list[FallenCupItem] = Field(default=[], description="감지된 컵 목록")
+    pose2d: Optional[FallenCupPose2D] = Field(None, description="단일 컵 2D 인식 결과")
+    grasp_pose: Optional[FallenCupGraspPose] = Field(None, description="단일 컵 3D grasp 좌표")
+
+    model_config = _example({
+        "detection_running": True,
+        "count": 1,
+        "cups": [{
+            "cup_id": 0,
+            "yaw": 3.10,
+            "grip_pixel": {"x": 425.0, "y": 306.0},
+            "confidence": 0.91,
+            "position": {"x": 0.012, "y": -0.034, "z": 0.41},
+        }],
+        "pose2d": None,
+        "grasp_pose": None,
+    })
+
+
 # ── Calibration ───────────────────────────────────────────────────────────────
 
 class CalibrationResponse(BaseModel):

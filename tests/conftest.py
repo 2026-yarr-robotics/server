@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from server.config import AppSettings
 from server.domains.cup_detection import CupDetectionDomain
+from server.domains.fallen_cup import FallenCupDomain
 from server.domains.robot import RobotDomain
 from server.ros.bridge import RosBridge
 from server.ros.launch import LaunchManager, RunningTask, TaskStatus
@@ -30,12 +31,18 @@ def mock_launcher() -> MagicMock:
     launcher.list_tasks = MagicMock(return_value=[])
     launcher.start = AsyncMock()
     launcher.stop = AsyncMock()
+    launcher._tasks = {}
     return launcher
 
 
 @pytest.fixture
 def cup_detection_domain(mock_bridge, mock_launcher) -> CupDetectionDomain:
     return CupDetectionDomain(mock_bridge, mock_launcher)
+
+
+@pytest.fixture
+def fallen_cup_domain(mock_bridge, mock_launcher) -> FallenCupDomain:
+    return FallenCupDomain(mock_bridge, mock_launcher)
 
 
 @pytest.fixture

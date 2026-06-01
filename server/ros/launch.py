@@ -18,10 +18,13 @@ from ..config import WorkspaceConfig
 logger = logging.getLogger(__name__)
 
 BRINGUP_COMMANDS = {"bringup_sim", "bringup_real"}
-SERVICE_COMMANDS = {"cup_detection", "gripper", "skill_api"}
+SERVICE_COMMANDS = {"cup_detection", "gripper", "skill_api", "fallen_cup_detect"}
 # gripper: Modbus-only, no MoveItPy conflict.
 # skill_api: long-lived pick / pyramid server, lazily started by
 #   RobotDomain.pick_skill / pyramid_skill.
+# fallen_cup_detect: long-lived YOLO fallen-cup detection
+#   (cup_stack/fallen_cup_detect.launch.py wraps speed_stack_yolo_seg).
+#   Pure perception, no MoveItPy conflict.
 
 # Substrings that make a log line too noisy to show in the dashboard feed
 _LOG_NOISE = frozenset([
@@ -33,7 +36,12 @@ _LOG_NOISE = frozenset([
     "Service response received for initialization",
     "Waiting for '/controller_manager'",
 ])
-TASK_COMMANDS: set[str] = set()
+# fallen_cup_recovery: one-shot stand-fallen-cup motion task
+#   (cup_stack/fallen_cup_recovery.launch.py wraps dsr_practice/stand_fallen_cup
+#   under the /dsr01 namespace). Uses MoveItPy + dsr_moveit_controller, so it
+#   contends with the long-lived skill_api service for the robot controllers —
+#   RobotDomain.start_fallen_cup_recovery stops skill_api before starting it.
+TASK_COMMANDS: set[str] = {"fallen_cup_recovery"}
 ALL_COMMANDS = BRINGUP_COMMANDS | TASK_COMMANDS | SERVICE_COMMANDS
 
 

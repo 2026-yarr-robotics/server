@@ -287,6 +287,33 @@ class RobotDomain:
         await self._launcher.stop(name)
         return {"name": name, "status": "stopped", "ros_stop_success": ros_stop_success}
 
+    async def start_fallen_cup_recovery(
+        self,
+        mode: str = "drop",
+        multi_cup: bool = False,
+        dry_run: bool = False,
+        sim: bool = False,
+    ) -> dict[str, Any]:
+        """넘어진 컵 세우기 태스크(fallen_cup_recovery launch)를 시작한다.
+
+        stand_fallen_cup 노드는 MoveItPy + dsr_moveit_controller 를 사용하므로
+        장기 실행 중인 skill_api(역시 MoveItPy 기반)와 컨트롤러 경합이 생긴다.
+        시작 전에 skill_api 를 best-effort 로 정지시킨다 (다음 pick/pyramid
+        호출 시 lazy 재시작됨).
+        """
+        try:
+            await self._launcher.stop(SKILL_API_COMMAND)
+        except Exception as exc:
+            logger.warning("skill_api stop before fallen_cup_recovery failed: %s", exc)
+
+        args = {
+            "mode": mode,
+            "multi_cup": str(multi_cup).lower(),
+            "dry_run": str(dry_run).lower(),
+            "sim": str(sim).lower(),
+        }
+        return await self.start_task("fallen_cup_recovery", args)
+
     async def _stop_motion(self) -> bool:
         """Best-effort: Doosan 컨트롤러에 퀵스탑 명령을 보낸다."""
         if not self._bridge.connected:

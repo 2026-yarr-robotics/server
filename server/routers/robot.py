@@ -5,12 +5,16 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from ..domains.cup_detection import CupDetectionDomain
+from ..domains.fallen_cup import FallenCupDomain
 from ..domains.robot import RobotDomain
 from ..ros.launch import ALL_COMMANDS
 from ..schemas import (
     BringupRequest,
     CupDetectionFrame,
     EEPositionSchema,
+    FallenCupDetectionStartRequest,
+    FallenCupRecoveryRequest,
+    FallenCupStateResponse,
     GripperRequest,
     GripperResponse,
     MoveRequest,
@@ -37,6 +41,7 @@ router = APIRouter(prefix="/api/robot", tags=["robot"])
 
 robot_domain: RobotDomain | None = None
 cup_detection_domain: CupDetectionDomain | None = None
+fallen_cup_domain: FallenCupDomain | None = None
 
 
 def set_robot_domain(domain: RobotDomain) -> None:
@@ -49,6 +54,11 @@ def set_cup_detection_domain(domain: CupDetectionDomain) -> None:
     cup_detection_domain = domain
 
 
+def set_fallen_cup_domain(domain: FallenCupDomain) -> None:
+    global fallen_cup_domain
+    fallen_cup_domain = domain
+
+
 def _get_domain() -> RobotDomain:
     if robot_domain is None:
         raise HTTPException(status_code=503, detail="Robot domain not initialized")
@@ -59,6 +69,12 @@ def _get_cup_domain() -> CupDetectionDomain:
     if cup_detection_domain is None:
         raise HTTPException(status_code=503, detail="Cup detection domain not initialized")
     return cup_detection_domain
+
+
+def _get_fallen_cup_domain() -> FallenCupDomain:
+    if fallen_cup_domain is None:
+        raise HTTPException(status_code=503, detail="Fallen cup domain not initialized")
+    return fallen_cup_domain
 
 
 @router.get("/status", response_model=RobotStatusResponse)
@@ -294,3 +310,61 @@ async def skill_scan_square() -> dict:
 @router.get("/cups", response_model=CupDetectionFrame)
 async def get_cups() -> dict:
     return _get_cup_domain().get_cups()
+
+
+# ── Fallen Cup ────────────────────────────────────────────────────────────────
+
+@router.post("/fallen-cup/detection/start", response_model=TaskStartedResponse)
+async def start_fallen_cup_detection(body: FallenCupDetectionStartRequest) -> dict:
+    """넘어진 컵 YOLO 인식 노드(fallen_cup_detect)를 시작한다.
+
+    장기 실행 서비스(SERVICE_COMMAND)라 다른 액션 태스크와 병행 가능.
+    eye-in-hand(/hand) 카메라 토픽을 사용한다.
+    """
+    domain = _get_fallen_cup_domain()
+    args = domain.build_detection_args(
+        conf=body.conf,
+        imgsz=body.imgsz,
+        use_depth=body.use_depth,
+        weights_path=body.weights_path,
+    )
+    try:
+        return await domain.start_detection(args)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/fallen-cup/detection/stop", response_model=TaskStoppedResponse)
+async def stop_fallen_cup_detection() -> dict:
+    """넘어진 컵 인식 노드를 중지한다 (로봇 모션 정지 없음)."""
+    domain = _get_fallen_cup_domain()
+    return await domain.stop_detection()
+
+
+@router.get("/fallen-cup/state", response_model=FallenCupStateResponse)
+async def get_fallen_cup_state() -> dict:
+    """인식 노드 실행 여부 + 최근 인식 결과(2초 내 갱신분)를 반환한다."""
+    return _get_fallen_cup_domain().get_state()
+
+
+@router.post("/fallen-cup/recovery", response_model=TaskStartedResponse)
+async def start_fallen_cup_recovery(body: FallenCupRecoveryRequest) -> dict:
+    """넘어진 컵 세우기 태스크(fallen_cup_recovery)를 시작한다.
+
+    1회 실행 태스크: 인식 토픽을 수집해 컵을 잡아 세운 뒤 HOME 복귀 후 종료.
+    MoveItPy 컨트롤러 경합 방지를 위해 skill_api 서비스가 떠 있으면 먼저
+    중지한다 (다음 pick/pyramid 호출 시 자동 재시작).
+
+    진행 상황: ``/ws/task/log`` · ``/ws/robot/state``
+    중지: ``POST /api/robot/task/stop`` ``{"name": "fallen_cup_recovery"}``
+    """
+    domain = _get_domain()
+    try:
+        return await domain.start_fallen_cup_recovery(
+            mode=body.mode,
+            multi_cup=body.multi_cup,
+            dry_run=body.dry_run,
+            sim=body.sim,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))

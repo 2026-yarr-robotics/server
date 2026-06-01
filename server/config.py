@@ -122,6 +122,33 @@ class WorkspaceLimits:
 
 
 @dataclass(frozen=True)
+class FallenCupConfig:
+    """Fallen-cup detection (YOLO) launch defaults.
+
+    ``weights_path`` is the absolute path to the trained YOLOv-seg ``best.pt``.
+    Empty string falls back to the launch file default
+    (speed_stack_yolo_seg share ``weights/best.pt``). Override via the
+    ``FALLEN_CUP_WEIGHTS`` env var on the robot service.
+    """
+
+    weights_path: str = ""
+    conf: float = 0.70
+    imgsz: int = 1280
+    use_depth: bool = True
+    device: str = "cpu"
+
+
+@dataclass(frozen=True)
+class FallenCupTopics:
+    """Topics published by the fallen-cup detection node."""
+
+    pose2d: str = "/fallen_cup/pose2d"
+    grasp_pose: str = "/fallen_cup/grasp_pose"
+    cups_pose2d: str = "/fallen_cup/cups_pose2d"
+    cups_grasp_poses: str = "/fallen_cup/cups_grasp_poses"
+
+
+@dataclass(frozen=True)
 class ServicePorts:
     robot: int = 8001
     handineye: int = 8002
@@ -139,3 +166,5 @@ class AppSettings:
     robot_home: RobotHome = field(default_factory=RobotHome)
     ports: ServicePorts = field(default_factory=ServicePorts)
     workspace_limits: WorkspaceLimits = field(default_factory=WorkspaceLimits)
+    fallen_cup: FallenCupConfig = field(default_factory=FallenCupConfig)
+    fallen_cup_topics: FallenCupTopics = field(default_factory=FallenCupTopics)

@@ -13,10 +13,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from ..access_log import APIAccessLogMiddleware
 from ..config import AppSettings
 from ..domains.cup_detection import CupDetectionDomain
+from ..domains.fallen_cup import FallenCupDomain
 from ..domains.robot import RobotDomain
 from ..ros.bridge import RosBridge, connect_bridge, disconnect_bridge
 from ..ros.launch import LaunchManager
-from ..routers.robot import router as robot_router, set_cup_detection_domain, set_robot_domain
+from ..routers.robot import (
+    router as robot_router,
+    set_cup_detection_domain,
+    set_fallen_cup_domain,
+    set_robot_domain,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -24,17 +30,25 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-from ..config import RosBridgeConfig as _RBC
+from ..config import FallenCupConfig as _FCC, RosBridgeConfig as _RBC
 
 settings = AppSettings()
 settings.rosbridge = _RBC(
     host=os.getenv("ROSBRIDGE_HOST", settings.rosbridge.host),
     port=int(os.getenv("ROSBRIDGE_PORT", str(settings.rosbridge.port))),
 )
+settings.fallen_cup = _FCC(
+    weights_path=os.getenv("FALLEN_CUP_WEIGHTS", settings.fallen_cup.weights_path),
+    conf=settings.fallen_cup.conf,
+    imgsz=settings.fallen_cup.imgsz,
+    use_depth=settings.fallen_cup.use_depth,
+    device=os.getenv("FALLEN_CUP_DEVICE", settings.fallen_cup.device),
+)
 
 _domain: RobotDomain | None = None
 _launcher: LaunchManager | None = None
 _cup_domain: CupDetectionDomain | None = None
+_fallen_cup_domain: FallenCupDomain | None = None
 
 
 def create_app() -> FastAPI:
@@ -42,7 +56,7 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        global _domain, _launcher, _cup_domain
+        global _domain, _launcher, _cup_domain, _fallen_cup_domain
 
         _launcher = LaunchManager(
             settings.workspace,
@@ -81,6 +95,15 @@ def create_app() -> FastAPI:
             _cup_domain = CupDetectionDomain(bridge, _launcher)
             _cup_domain.subscribe()
             set_cup_detection_domain(_cup_domain)
+
+            _fallen_cup_domain = FallenCupDomain(
+                bridge,
+                _launcher,
+                config=settings.fallen_cup,
+                topics=settings.fallen_cup_topics,
+            )
+            _fallen_cup_domain.subscribe()
+            set_fallen_cup_domain(_fallen_cup_domain)
 
         logger.info("robot service started on port %d", settings.ports.robot)
         yield

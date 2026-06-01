@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import AppSettings
 from .domains.cup_detection import CupDetectionDomain
+from .domains.fallen_cup import FallenCupDomain
 from .domains.handineye import HandInEyeDomain
 from .domains.handtoeye import HandToEyeDomain
 from .domains.robot import RobotDomain
@@ -85,8 +86,17 @@ async def lifespan(app: FastAPI):
     cup_detection_domain = CupDetectionDomain(bridge, launcher)
     cup_detection_domain.subscribe()
 
+    fallen_cup_domain = FallenCupDomain(
+        bridge,
+        launcher,
+        config=settings.fallen_cup,
+        topics=settings.fallen_cup_topics,
+    )
+    fallen_cup_domain.subscribe()
+
     robot.set_robot_domain(robot_domain)
     robot.set_cup_detection_domain(cup_detection_domain)
+    robot.set_fallen_cup_domain(fallen_cup_domain)
     handineye.set_handineye_domain(handineye_domain)
     handtoeye.set_handtoeye_domain(handtoeye_domain)
     dashboard.set_dashboard_deps(robot_domain, camera_mgr, launcher, cup_detection_domain)

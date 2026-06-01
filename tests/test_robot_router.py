@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from server.domains.cup_detection import CupDetectionDomain
+from server.domains.fallen_cup import FallenCupDomain
 from server.domains.robot import RobotDomain
 from server.ros.launch import RunningTask, TaskStatus
 from server.routers import robot as robot_router_module
@@ -18,11 +19,13 @@ from server.routers.robot import router
 def _make_test_client(
     robot_domain: RobotDomain,
     cup_domain: CupDetectionDomain,
+    fallen_domain: FallenCupDomain,
 ) -> TestClient:
     app = FastAPI()
     app.include_router(router)
     robot_router_module.set_robot_domain(robot_domain)
     robot_router_module.set_cup_detection_domain(cup_domain)
+    robot_router_module.set_fallen_cup_domain(fallen_domain)
     return TestClient(app)
 
 
@@ -34,8 +37,8 @@ def _make_running_task(name: str) -> RunningTask:
 
 
 @pytest.fixture
-def client(robot_domain, cup_detection_domain) -> TestClient:
-    return _make_test_client(robot_domain, cup_detection_domain)
+def client(robot_domain, cup_detection_domain, fallen_cup_domain) -> TestClient:
+    return _make_test_client(robot_domain, cup_detection_domain, fallen_cup_domain)
 
 
 class TestCupsEndpoint:
@@ -102,3 +105,83 @@ class TestTaskLogEndpoint:
     def test_tail_out_of_range(self, client: TestClient):
         resp = client.get("/api/robot/task/log?name=gripper&tail=1000")
         assert resp.status_code == 400
+
+
+class TestFallenCupEndpoints:
+    def test_state_initial(self, client: TestClient):
+        resp = client.get("/api/robot/fallen-cup/state")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["detection_running"] is False
+        assert data["count"] == 0
+        assert data["cups"] == []
+        assert data["pose2d"] is None
+        assert data["grasp_pose"] is None
+
+    def test_detection_start_calls_launcher(
+        self, client: TestClient, fallen_cup_domain: FallenCupDomain, mock_launcher,
+    ):
+        mock_launcher.start.return_value = _make_running_task("fallen_cup_detect")
+        resp = client.post(
+            "/api/robot/fallen-cup/detection/start",
+            json={"conf": 0.5, "imgsz": 640, "use_depth": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "fallen_cup_detect"
+
+        called_command, called_args = mock_launcher.start.call_args[0]
+        assert called_command == "fallen_cup_detect"
+        assert called_args["conf"] == "0.5"
+        assert called_args["imgsz"] == "640"
+        assert called_args["use_depth"] == "false"
+
+    def test_detection_start_conflict_returns_409(
+        self, client: TestClient, mock_launcher,
+    ):
+        mock_launcher.start.side_effect = RuntimeError("already running")
+        resp = client.post("/api/robot/fallen-cup/detection/start", json={})
+        assert resp.status_code == 409
+
+    def test_detection_stop(self, client: TestClient, mock_launcher):
+        resp = client.post("/api/robot/fallen-cup/detection/stop")
+        assert resp.status_code == 200
+        mock_launcher.stop.assert_awaited_with("fallen_cup_detect")
+
+    def test_recovery_stops_skill_api_and_starts_task(
+        self, client: TestClient, mock_launcher,
+    ):
+        mock_launcher.start.return_value = _make_running_task("fallen_cup_recovery")
+        resp = client.post(
+            "/api/robot/fallen-cup/recovery",
+            json={"mode": "place", "multi_cup": True, "dry_run": False, "sim": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "fallen_cup_recovery"
+
+        # MoveItPy 컨트롤러 경합 방지: skill_api 먼저 정지
+        mock_launcher.stop.assert_awaited_with("skill_api")
+
+        called_command, called_args = mock_launcher.start.call_args[0]
+        assert called_command == "fallen_cup_recovery"
+        assert called_args == {
+            "mode": "place", "multi_cup": "true", "dry_run": "false", "sim": "true",
+        }
+
+    def test_recovery_invalid_mode_returns_422(self, client: TestClient):
+        resp = client.post("/api/robot/fallen-cup/recovery", json={"mode": "throw"})
+        assert resp.status_code == 422
+
+    def test_recovery_conflict_returns_409(self, client: TestClient, mock_launcher):
+        mock_launcher.start.side_effect = RuntimeError("Task 'x' is already running")
+        resp = client.post("/api/robot/fallen-cup/recovery", json={"mode": "drop"})
+        assert resp.status_code == 409
+
+    def test_state_503_when_domain_not_set(self, robot_domain, cup_detection_domain):
+        app = FastAPI()
+        app.include_router(router)
+        robot_router_module.set_robot_domain(robot_domain)
+        robot_router_module.set_cup_detection_domain(cup_detection_domain)
+        robot_router_module.fallen_cup_domain = None
+        c = TestClient(app)
+        resp = c.get("/api/robot/fallen-cup/state")
+        assert resp.status_code == 503
