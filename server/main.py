@@ -45,6 +45,8 @@ async def lifespan(app: FastAPI):
         bridge,
         launcher,
         settings.robot.joint_states,
+        workspace_limits=settings.workspace_limits,
+        robot_home=settings.robot_home,
         skill_api_url=settings.skill_api.url,
     )
     robot_domain.subscribe()

@@ -101,6 +101,14 @@ class RobotTopics:
 
 
 @dataclass(frozen=True)
+class RobotHome:
+    """Configured HOME end-effector XY in base_link frame (meters)."""
+
+    x: float = 0.45
+    y: float = 0.0
+
+
+@dataclass(frozen=True)
 class WorkspaceLimits:
     """Robot workspace safe zone limits (meters)."""
 
@@ -128,5 +136,6 @@ class AppSettings:
     workspace: WorkspaceConfig = field(default_factory=WorkspaceConfig)
     cameras: CameraTopics = field(default_factory=CameraTopics)
     robot: RobotTopics = field(default_factory=RobotTopics)
+    robot_home: RobotHome = field(default_factory=RobotHome)
     ports: ServicePorts = field(default_factory=ServicePorts)
     workspace_limits: WorkspaceLimits = field(default_factory=WorkspaceLimits)

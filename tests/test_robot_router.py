@@ -79,6 +79,21 @@ class TestRobotStatusEndpoint:
         assert "tasks" in data
 
 
+class TestPyramidConfigEndpoint:
+    def test_get_pyramid_config_uses_configured_home_xy(
+        self,
+        client: TestClient,
+    ):
+        resp = client.get("/api/robot/config/pyramid")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["center"] == {"x": 0.45, "y": 0.0}
+        assert data["slots"]["1l"]["x"] == 0.45
+        assert data["slots"]["1l"]["y"] == -0.079
+        assert data["slots"]["1m"]["x"] == 0.45
+        assert data["slots"]["1m"]["y"] == 0.0
+
+
 class TestTaskLogEndpoint:
     def test_missing_name(self, client: TestClient):
         resp = client.get("/api/robot/task/log")

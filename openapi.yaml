@@ -242,7 +242,7 @@ paths:
       description: |
         3-2-1 피라미드의 중심 좌표(cp), 행 방향 yaw(degree), pick Z 와
         6개 슬롯의 절대 place 좌표 캐시를 반환한다. cp 가 아직 설정되지
-        않았으면 HOME EE 좌표로 lazy 초기화하며, HOME EE 좌표 미수신 시 503.
+        않았으면 config 의 HOME XY 로 lazy 초기화한다.
       responses:
         "200":
           description: 현재 피라미드 설정

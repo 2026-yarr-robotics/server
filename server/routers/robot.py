@@ -210,7 +210,7 @@ async def skill_pick(body: PickSkillRequest) -> dict:
 async def get_pyramid_config() -> dict:
     """현재 피라미드 설정과 6개 슬롯의 절대 place 좌표 캐시.
 
-    cp(center)가 아직 설정 안 됐고 HOME EE 좌표도 수신 못했으면 503.
+    cp(center)가 아직 설정 안 됐으면 config 의 HOME XY 로 lazy 초기화한다.
     """
     domain = _get_domain()
     try:

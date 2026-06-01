@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from ..config import WorkspaceLimits
+from ..config import RobotHome, WorkspaceLimits
 from ..ros.bridge import RosBridge
 from ..ros.launch import BRINGUP_COMMANDS, LaunchManager, TaskStatus
 
@@ -90,6 +90,7 @@ class RobotDomain:
         launcher: LaunchManager,
         joint_states_topic: str = "/joint_states",
         workspace_limits: WorkspaceLimits | None = None,
+        robot_home: RobotHome | None = None,
         config_dir: Path | None = None,
         camera_info_topic: str | None = None,
         depth_topic: str | None = None,
@@ -122,9 +123,11 @@ class RobotDomain:
             z_max=workspace_limits.z_max if workspace_limits else 0.55,
             grid_spacing=workspace_limits.grid_spacing if workspace_limits else 0.05,
         )
+        home = robot_home or RobotHome()
+        self._robot_home = {"x": float(home.x), "y": float(home.y)}
 
-        # 3-2-1 pyramid config: center XY (None ⇒ initialized from HOME EE on
-        # first read), degree (yaw, +x axis CCW), pick gripper Z, and the
+        # 3-2-1 pyramid config: center XY (None ⇒ initialized from configured
+        # HOME XY on first read), degree (yaw, +x axis CCW), pick gripper Z, and the
         # cached 6-slot absolute place coordinates.
         self._pyramid_center: dict[str, float] | None = None
         self._pyramid_degree: float = DEFAULT_PYRAMID_DEGREE
@@ -661,19 +664,17 @@ class RobotDomain:
     # ── Pyramid config + skill ───────────────────────────────────────────────
 
     def _ensure_pyramid_center(self) -> dict[str, float]:
-        """Return current pyramid center, lazy-initializing to HOME EE XY.
-
-        Raises ValueError when EE pose is not yet available — caller should
-        translate to HTTP 503.
-        """
+        """Return current pyramid center, lazy-initializing to configured HOME XY."""
         if self._pyramid_center is None:
-            ee = self.get_ee_position()
-            if ee is None:
+            hx = self._robot_home["x"]
+            hy = self._robot_home["y"]
+            if not (self._move_limits.x_min <= hx <= self._move_limits.x_max
+                    and self._move_limits.y_min <= hy <= self._move_limits.y_max):
                 raise ValueError(
-                    "pyramid center not set and HOME EE pose is unavailable "
-                    "(is bringup running?)"
+                    f"configured HOME ({hx:.3f},{hy:.3f}) outside workspace "
+                    "XY limits"
                 )
-            self._pyramid_center = {"x": float(ee["x"]), "y": float(ee["y"])}
+            self._pyramid_center = {"x": hx, "y": hy}
             self._recompute_slots()
         return self._pyramid_center
 

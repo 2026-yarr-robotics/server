@@ -68,6 +68,8 @@ def create_app() -> FastAPI:
                 bridge,
                 _launcher,
                 settings.robot.joint_states,
+                workspace_limits=settings.workspace_limits,
+                robot_home=settings.robot_home,
                 config_dir=settings.workspace.config_dir,
                 camera_info_topic=settings.cameras.hand_info,
                 depth_topic=settings.cameras.hand_depth,

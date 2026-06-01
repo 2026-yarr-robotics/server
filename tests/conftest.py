@@ -46,4 +46,5 @@ def robot_domain(mock_bridge, mock_launcher) -> RobotDomain:
         mock_launcher,
         settings.robot.joint_states,
         settings.workspace_limits,
+        settings.robot_home,
     )
