@@ -1,5 +1,6 @@
 """Server configuration loaded from environment or defaults."""
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -17,9 +18,14 @@ def _server_dir() -> Path:
 def _default_state_dir() -> Path:
     """Writable dir for runtime state that must survive container restarts.
 
-    Backed by a Docker named volume mounted at ``/app/data`` (see
-    docker-compose.yml). Holds e.g. the persisted pyramid config.
+    Honors ``CUP_STATE_DIR`` (set to ``/app/data`` in docker-compose, where the
+    ``robot_state`` named volume is mounted). The ``__file__``-relative fallback
+    is only for local dev — inside the image the package is pip-installed into
+    site-packages, so that path would NOT line up with the volume mount.
     """
+    env = os.getenv("CUP_STATE_DIR")
+    if env:
+        return Path(env)
     return Path(__file__).resolve().parents[1] / "data"
 
 
