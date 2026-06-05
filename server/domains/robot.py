@@ -40,7 +40,7 @@ SKILL_API_POLL_INTERVAL = 2.0    # seconds between readiness probes
 # 3-2-1 pyramid geometry (matches cup_stack.skills.config.SkillStackConfig).
 # Slot layout — lateral offset (m) and vertical layer (0=bottom, 2=top).
 PYRAMID_CUP_SPACING = 0.078
-PYRAMID_LAYER_HEIGHT = 0.095
+PYRAMID_LAYER_HEIGHT = 0.093
 PYRAMID_PLACE_Z_BASE = 0.318
 DEFAULT_PYRAMID_DEGREE = 90.0
 DEFAULT_PYRAMID_PICK_Z = 0.313  # SkillStackConfig.pick_z_base
