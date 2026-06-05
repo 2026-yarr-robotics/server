@@ -27,6 +27,8 @@ services:
       - SKILL_API_URL=http://host.docker.internal:8765
     volumes:
       - ../cup_stack/ros2:/app/ros2:ro
+      # Persist runtime state (pyramid config) across container restarts.
+      - robot_state:/app/data
     networks:
       - cup_stack
     restart: unless-stopped
@@ -79,3 +81,6 @@ services:
 networks:
   cup_stack:
     driver: bridge
+
+volumes:
+  robot_state:

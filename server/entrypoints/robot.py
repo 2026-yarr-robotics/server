@@ -88,6 +88,7 @@ def create_app() -> FastAPI:
                 camera_info_topic=settings.cameras.hand_info,
                 depth_topic=settings.cameras.hand_depth,
                 skill_api_url=os.getenv("SKILL_API_URL", settings.skill_api.url),
+                pyramid_state_path=settings.state_dir / "pyramid_config.json",
             )
             _domain.subscribe()
             set_robot_domain(_domain)

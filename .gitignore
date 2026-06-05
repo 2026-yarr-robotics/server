@@ -7,6 +7,9 @@ build/
 *.json
 .env
 
+# Runtime state (persisted pyramid config); backed by a Docker volume in prod
+data/
+
 # Claude Code worktrees / local agent state
 .claude/
 bringup_real.local.sh

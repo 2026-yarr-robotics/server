@@ -95,6 +95,7 @@ class RobotDomain:
         camera_info_topic: str | None = None,
         depth_topic: str | None = None,
         skill_api_url: str = "http://localhost:8765",
+        pyramid_state_path: Path | None = None,
     ) -> None:
         self._bridge = bridge
         self._launcher = launcher
@@ -133,6 +134,9 @@ class RobotDomain:
         self._pyramid_degree: float = DEFAULT_PYRAMID_DEGREE
         self._pyramid_pick_z: float = DEFAULT_PYRAMID_PICK_Z
         self._pyramid_slots: dict[str, dict[str, float]] = {}
+        # Persist pyramid config (center/degree/pick_z) across restarts.
+        self._pyramid_state_path = pyramid_state_path
+        self._load_pyramid_config()
 
     @property
     def move_limits(self) -> dict[str, Any]:
@@ -786,7 +790,55 @@ class RobotDomain:
 
         self._recompute_slots()
         self._validate_slot_z_bounds()
+        self._save_pyramid_config()
         return self.get_pyramid_config()
+
+    def _load_pyramid_config(self) -> None:
+        """Restore persisted pyramid center/degree/pick_z, if a state file exists.
+
+        Best-effort: a missing or corrupt file leaves the in-memory defaults
+        (center stays None → lazy-initialized from HOME on first read).
+        """
+        path = self._pyramid_state_path
+        if path is None or not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text())
+            center = data.get("center")
+            if center is not None:
+                self._pyramid_center = {
+                    "x": float(center["x"]),
+                    "y": float(center["y"]),
+                }
+            if data.get("degree") is not None:
+                self._pyramid_degree = float(data["degree"]) % 360.0
+            if data.get("pick_z") is not None:
+                self._pyramid_pick_z = float(data["pick_z"])
+            if self._pyramid_center is not None:
+                self._recompute_slots()
+            logger.info("Loaded pyramid config from %s", path)
+        except (OSError, ValueError, KeyError, TypeError):
+            logger.warning(
+                "Ignoring unreadable pyramid config at %s", path, exc_info=True
+            )
+
+    def _save_pyramid_config(self) -> None:
+        """Persist pyramid center/degree/pick_z to the state file (best-effort)."""
+        path = self._pyramid_state_path
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "center": dict(self._pyramid_center) if self._pyramid_center else None,
+                "degree": self._pyramid_degree,
+                "pick_z": self._pyramid_pick_z,
+            }
+            path.write_text(json.dumps(payload, indent=2))
+        except OSError:
+            logger.warning(
+                "Failed to persist pyramid config to %s", path, exc_info=True
+            )
 
     async def pyramid_skill(
         self,

@@ -14,6 +14,15 @@ def _server_dir() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _default_state_dir() -> Path:
+    """Writable dir for runtime state that must survive container restarts.
+
+    Backed by a Docker named volume mounted at ``/app/data`` (see
+    docker-compose.yml). Holds e.g. the persisted pyramid config.
+    """
+    return Path(__file__).resolve().parents[1] / "data"
+
+
 @dataclass(frozen=True)
 class ServerConfig:
     host: str = "0.0.0.0"
@@ -165,6 +174,7 @@ class AppSettings:
     robot: RobotTopics = field(default_factory=RobotTopics)
     robot_home: RobotHome = field(default_factory=RobotHome)
     ports: ServicePorts = field(default_factory=ServicePorts)
+    state_dir: Path = field(default_factory=_default_state_dir)
     workspace_limits: WorkspaceLimits = field(default_factory=WorkspaceLimits)
     fallen_cup: FallenCupConfig = field(default_factory=FallenCupConfig)
     fallen_cup_topics: FallenCupTopics = field(default_factory=FallenCupTopics)

@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI):
         workspace_limits=settings.workspace_limits,
         robot_home=settings.robot_home,
         skill_api_url=settings.skill_api.url,
+        pyramid_state_path=settings.state_dir / "pyramid_config.json",
     )
     robot_domain.subscribe()
 
