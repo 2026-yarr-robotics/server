@@ -128,7 +128,7 @@ class WorkspaceLimits:
     """Robot workspace safe zone limits (meters)."""
 
     x_min: float = -0.5
-    x_max: float = 0.5
+    x_max: float = 0.54
     y_min: float = -0.5
     y_max: float = 0.5
     z_min: float = 0.25
