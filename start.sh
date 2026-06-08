@@ -2,7 +2,8 @@
 # start.sh — 컵 스태킹 로봇 시스템 통합 실행 스크립트
 #
 # 사용법:
-#   ./start.sh              # rosbridge + 카메라 + bringup-agent + Docker 서버
+#   ./start.sh                    # rosbridge + exo 카메라 + exo perception + bringup-agent + Docker
+#   WITH_HAND_CAM=true ./start.sh # hand 카메라까지 함께 기동 (기본 미기동)
 #
 # bringup은 웹 대시보드(https://yarr.simplyimg.com)에서 버튼으로 제어합니다.
 
@@ -11,6 +12,20 @@ set -e
 ROS_SETUP="/opt/ros/humble/setup.bash"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 SESSION="cup-stack"
+
+# 모든 ROS 노드가 같은 도메인에서 통신하도록 일관 적용한다 (.bashrc 와 동일값).
+# 이 export 는 tmux 서버가 상속하므로 아래 모든 창의 셸에 전파된다.
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-21}"
+
+# exo-only 통합 실험이 기본값. hand 카메라는 같은 호스트에서 D435i 2대가 USB
+# 자원을 다투다 "resource busy"/SIGSEGV 를 내므로 이번 실험에선 기본 미기동.
+# 필요 시 WITH_HAND_CAM=true 로만 켠다.
+WITH_HAND_CAM="${WITH_HAND_CAM:-false}"
+
+# exo perception 의 RViz. world_origin_node 가 ArUco(ID 0)로 world 좌표계를
+# 잡는데, RViz 로 world 축이 로봇 base 와 맞는지 확인하고 Redetect 팝업으로
+# 재검출하는 초기화 작업이 필요하므로 기본 on. headless 면 VISION_RVIZ=false.
+VISION_RVIZ="${VISION_RVIZ:-true}"
 
 # ── 사전 확인 ──────────────────────────────────────────────
 if [[ ! -f "$ROS_SETUP" ]]; then
@@ -59,9 +74,24 @@ RECODE_SETUP="$SCRIPT_DIR/../../vision/ros2-recode-sequence/install/setup.bash"
 tmux send-keys -t "$SESSION:cam-exo" \
     "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=exo" Enter
 
-tmux new-window -t "$SESSION" -n "cam-hand"
-tmux send-keys -t "$SESSION:cam-hand" \
-    "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=hand" Enter
+# ── 창: exo perception (depth_digital_twin) ───────────────
+# exo 카메라 영상(/exo/exo/*)을 받아 /digital_twin/boxes, /vision/cups_on_table
+# 를 만드는 비전 파이프라인. cup_stack_agent 의 stabilizer/aggregator 가 이걸
+# 소비한다. camera_ns:=exo 로 /camera/camera/* → /exo/exo/* 리맵이 걸린다.
+# integration repo 의 vision/ros2-depth-point-cloude install 을 반드시 source.
+DEPTH_DT_SETUP="$SCRIPT_DIR/../../vision/ros2-depth-point-cloude/install/setup.bash"
+tmux new-window -t "$SESSION" -n "vision-exo"
+# 카메라가 /exo/exo/* 발행을 시작할 시간을 준 뒤 파이프라인을 띄운다
+# (world_origin_node 의 ArUco 타임아웃이 카메라 부팅 전에 도는 것 방지).
+tmux send-keys -t "$SESSION:vision-exo" \
+    "source $ROS_SETUP && source $DEPTH_DT_SETUP && sleep 8 && ros2 launch depth_digital_twin digital_twin.launch.py camera_ns:=exo rviz:=$VISION_RVIZ" Enter
+
+# hand 카메라는 이번 exo-only 실험에서 기본 미기동 (WITH_HAND_CAM=true 일 때만).
+if [[ "$WITH_HAND_CAM" == "true" ]]; then
+    tmux new-window -t "$SESSION" -n "cam-hand"
+    tmux send-keys -t "$SESSION:cam-hand" \
+        "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=hand" Enter
+fi
 
 # ── 창 2: bringup 에이전트 (포트 8099) ────────────────────
 tmux new-window -t "$SESSION" -n "bringup-agent"
@@ -89,11 +119,15 @@ echo "======================================================"
 echo " 컵 스태킹 로봇 시스템 시작 완료"
 echo "======================================================"
 echo " 세션 연결:   tmux attach -t $SESSION"
-echo " 창 전환:     Ctrl+b → 숫자"
-echo "   1 = rosbridge   2 = cam-exo (eye-to-hand)   3 = cam-hand (eye-in-hand)"
-echo "   4 = bringup-agent (port 8099)"
-echo "   5 = gripper"
-echo "   6 = server (Docker)"
+echo " 창 전환:     Ctrl+b → 숫자 (또는 창 이름)"
+echo "   rosbridge / cam-exo (eye-to-hand) / vision-exo (depth_digital_twin)"
+echo "   bringup-agent (port 8099) / gripper / server (Docker)"
+if [[ "$WITH_HAND_CAM" == "true" ]]; then
+    echo "   cam-hand (eye-in-hand)  ← WITH_HAND_CAM=true 로 기동됨"
+else
+    echo "   cam-hand 는 미기동 (필요 시 WITH_HAND_CAM=true ./start.sh)"
+fi
+echo " ROS_DOMAIN_ID=${ROS_DOMAIN_ID}"
 echo " 세션 종료:   tmux kill-session -t $SESSION"
 echo ""
 echo " 대시보드:    https://yarr.simplyimg.com"
