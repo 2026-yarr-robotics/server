@@ -29,12 +29,23 @@ source /opt/ros/humble/setup.bash
 # MoveIt 코어 베이스 (moveit_core / moveit_py / moveit_ros_planning 등)
 [[ -f "$HOME/ros2_ws/install/setup.bash" ]] && source "$HOME/ros2_ws/install/setup.bash"
 # 프로젝트 오버레이 — 마지막에 source 해 프로젝트 빌드본이 우선하도록 한다.
-PROJECT_OVERLAY="$SCRIPT_DIR/../ros2-cup-stack/ros2/install/setup.bash"
-if [[ -f "$PROJECT_OVERLAY" ]]; then
+# colcon 을 ros2-cup-stack 루트에서 돌리면 install/ 이 루트에 생기고,
+# ros2/ 하위에서 돌리면 ros2/install/ 에 생긴다. 둘 다 자동 탐지한다.
+PROJECT_OVERLAY=""
+for cand in \
+    "$SCRIPT_DIR/../ros2-cup-stack/install/setup.bash" \
+    "$SCRIPT_DIR/../ros2-cup-stack/ros2/install/setup.bash"; do
+    if [[ -f "$cand" ]]; then
+        PROJECT_OVERLAY="$cand"
+        break
+    fi
+done
+if [[ -n "$PROJECT_OVERLAY" ]]; then
     source "$PROJECT_OVERLAY"
 else
-    echo "[ERROR] 프로젝트 워크스페이스가 빌드되지 않았습니다: $PROJECT_OVERLAY" >&2
-    echo "        먼저 'cd ros2-cup-stack/ros2 && colcon build --symlink-install' 를 실행하세요." >&2
+    echo "[ERROR] 프로젝트 워크스페이스가 빌드되지 않았습니다 (install/setup.bash 없음):" >&2
+    echo "        $SCRIPT_DIR/../ros2-cup-stack/{,ros2/}install/setup.bash" >&2
+    echo "        먼저 'cd ros2-cup-stack && colcon build --symlink-install' 를 실행하세요." >&2
     exit 1
 fi
 
