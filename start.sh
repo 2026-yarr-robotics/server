@@ -51,11 +51,11 @@ tmux new-window -t "$SESSION" -n "cam-exo"
 # view:=exo|hand 로 카메라 1대씩 분리 기동해 D435i 두 대가 USB 자원을
 # 두고 충돌(SIGSEGV)하는 것을 막는다. IMU/initial_reset 비활성, 안정 동작.
 # 해상도는 launch 파일 default (color/depth 1280x720x30) 를 사용한다.
-CUP_STACK_SETUP="$SCRIPT_DIR/../ros2-cup-stack/ros2/install/setup.bash"
-# launch 는 ros2-recode-sequence 의 cameras_only.launch.py 를 그대로
-# 가져온 hard copy. cameras.yaml 경로를 recode_sequence share 에서
-# 찾으므로 그 워크스페이스도 함께 source 한다.
-RECODE_SETUP="$SCRIPT_DIR/../yarr-robust-speed-stack/ros2-recode-sequence/install/setup.bash"
+CUP_STACK_SETUP="$SCRIPT_DIR/../ros2-cup-stack/install/setup.bash"
+# cameras_only.launch.py 와 cameras.yaml 은 recode_sequence 패키지 share 에
+# 있다. recode_sequence 는 integration 의 vision/ 서브모듈로 옮겨졌으므로
+# (구 cup-stack-server/yarr-robust-speed-stack 아님) 그쪽 install 을 source 한다.
+RECODE_SETUP="$SCRIPT_DIR/../../vision/ros2-recode-sequence/install/setup.bash"
 tmux send-keys -t "$SESSION:cam-exo" \
     "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=exo" Enter
 
@@ -70,7 +70,7 @@ tmux send-keys -t "$SESSION:bringup-agent" \
 
 # ── 창 3: 그리퍼 노드 ────────────────────────────────────
 DOOSAN_SETUP="$HOME/ros2_ws/install/setup.bash"
-ROS2_CUP_STACK_SETUP="$SCRIPT_DIR/../ros2-cup-stack/ros2/install/setup.bash"
+ROS2_CUP_STACK_SETUP="$SCRIPT_DIR/../ros2-cup-stack/install/setup.bash"
 tmux new-window -t "$SESSION" -n "gripper"
 tmux send-keys -t "$SESSION:gripper" \
     "source $ROS_SETUP && source $DOOSAN_SETUP && source $ROS2_CUP_STACK_SETUP && ros2 launch cup_stack gripper.launch.py" Enter
