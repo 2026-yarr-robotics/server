@@ -88,7 +88,12 @@ _task_statuses: dict[str, str] = {}  # idle | running | failed
 
 
 def _build_task_cmd(command: str, args: dict[str, str]) -> list[str]:
-    install_setup = ROS2_WORKSPACE / "install" / "setup.bash"
+    # colcon builds the cup_stack overlay at the ros2-cup-stack root
+    # (ros2-cup-stack/install), NOT under ros2/. The old ROS2_WORKSPACE/install
+    # (= ros2-cup-stack/ros2/install) never existed, so the overlay was never
+    # sourced and `ros2 launch cup_stack ...` died with
+    # "Package 'cup_stack' not found".
+    install_setup = ROS2_WORKSPACE.parent / "install" / "setup.bash"  # ros2-cup-stack/install
     doosan_setup = Path.home() / "ros2_ws" / "install" / "setup.bash"
     moveit_setup = Path.home() / "ws_moveit" / "install" / "setup.bash"
     ros_setup = "/opt/ros/humble/setup.bash"
