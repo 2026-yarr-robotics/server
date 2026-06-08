@@ -150,7 +150,11 @@ class FallenCupConfig:
     conf: float = 0.70
     imgsz: int = 1280
     use_depth: bool = True
-    device: str = "cpu"
+    # GPU 추론 기본값 ("0" = CUDA:0). CPU 추론은 코어를 통째로 잡아먹어
+    # (~585% CPU) ros2_control_node 의 100Hz 스트리밍 루프를 굶겨 모든 JTC
+    # 스킬(pyramid/fallen)에서 stutter 를 유발한다. CUDA 불가 시 노드가 cpu 로
+    # 자동 fallback. FALLEN_CUP_DEVICE env 로 override 가능.
+    device: str = "0"
 
 
 @dataclass(frozen=True)
