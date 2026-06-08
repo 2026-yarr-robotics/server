@@ -154,7 +154,9 @@ class FallenCupConfig:
     # (~585% CPU) ros2_control_node 의 100Hz 스트리밍 루프를 굶겨 모든 JTC
     # 스킬(pyramid/fallen)에서 stutter 를 유발한다. CUDA 불가 시 노드가 cpu 로
     # 자동 fallback. FALLEN_CUP_DEVICE env 로 override 가능.
-    device: str = "0"
+    # "cuda" 사용 ("0" 은 launch 에서 INTEGER 로 파싱돼 STRING 파라미터와
+    # 타입 불일치로 노드가 죽음).
+    device: str = "cuda"
 
 
 @dataclass(frozen=True)

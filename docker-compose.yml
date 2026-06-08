@@ -25,10 +25,11 @@ services:
       - ROSBRIDGE_PORT=9090
       - BRINGUP_AGENT_URL=http://host.docker.internal:8099
       - SKILL_API_URL=http://host.docker.internal:8765
-      # fallen-cup YOLO inference device: "0" = CUDA:0 (GPU). CPU inference
+      # fallen-cup YOLO inference device: "cuda" = GPU. CPU inference
       # (~585% CPU) starves the 100Hz ros2_control loop -> skill jitter.
+      # Use "cuda" (not "0": launch parses "0" as INTEGER -> node type error).
       # Applied on container (re)create, no image rebuild needed.
-      - FALLEN_CUP_DEVICE=0
+      - FALLEN_CUP_DEVICE=cuda
       # Where the robot service writes persisted state (matches the volume below).
       - CUP_STATE_DIR=/app/data
     volumes:
