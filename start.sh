@@ -2,8 +2,8 @@
 # start.sh — 컵 스태킹 로봇 시스템 통합 실행 스크립트
 #
 # 사용법:
-#   ./start.sh                    # rosbridge + exo 카메라 + exo perception + bringup-agent + Docker
-#   WITH_HAND_CAM=true ./start.sh # hand 카메라까지 함께 기동 (기본 미기동)
+#   ./start.sh                     # rosbridge + exo·hand 카메라 + exo perception + bringup-agent + Docker
+#   WITH_HAND_CAM=false ./start.sh # hand 카메라 끄기 (USB 충돌 시)
 #
 # bringup은 웹 대시보드(https://yarr.simplyimg.com)에서 버튼으로 제어합니다.
 
@@ -17,10 +17,10 @@ SESSION="cup-stack"
 # 이 export 는 tmux 서버가 상속하므로 아래 모든 창의 셸에 전파된다.
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-21}"
 
-# exo-only 통합 실험이 기본값. hand 카메라는 같은 호스트에서 D435i 2대가 USB
-# 자원을 다투다 "resource busy"/SIGSEGV 를 내므로 이번 실험에선 기본 미기동.
-# 필요 시 WITH_HAND_CAM=true 로만 켠다.
-WITH_HAND_CAM="${WITH_HAND_CAM:-false}"
+# hand 카메라 기본 기동(on). 단 같은 호스트에서 D435i 2대(exo+hand)가 USB
+# 자원을 다투면 "resource busy"/SIGSEGV 가 날 수 있으므로, 문제 시
+# WITH_HAND_CAM=false ./start.sh 로 끈다.
+WITH_HAND_CAM="${WITH_HAND_CAM:-true}"
 
 # exo perception 의 RViz. world_origin_node 가 ArUco(ID 0)로 world 좌표계를
 # 잡는데, RViz 로 world 축이 로봇 base 와 맞는지 확인하고 Redetect 팝업으로
@@ -86,6 +86,18 @@ tmux new-window -t "$SESSION" -n "vision-exo"
 tmux send-keys -t "$SESSION:vision-exo" \
     "source $ROS_SETUP && source $DEPTH_DT_SETUP && sleep 8 && ros2 launch depth_digital_twin digital_twin.launch.py camera_ns:=exo rviz:=$VISION_RVIZ" Enter
 
+# ── 창: stack verifier (cup_stacking_verify) ──────────────
+# /digital_twin/boxes 를 받아 어느 슬롯이 채워졌는지 판정해 /vision/stack(+
+# /stack_track_ids)을 발행한다. aggregator 가 /vision/stack -> /stack 으로 중계해
+# GSP 가 각 pyramid step 완료를 확인하고 다음 step 으로 진행한다(이게 없으면
+# step 1 에서 루프가 멈춤). slot 단축키(L1_L..)는 payload_builder.normalize_stack
+# 가 L1_left.. 로 변환하므로 그대로 둔다.
+VISION_NODE_SETUP="$SCRIPT_DIR/../../vision/vision-node/install/setup.bash"
+tmux new-window -t "$SESSION" -n "verifier"
+# vision-exo 가 /digital_twin/boxes 를 내보낸 뒤 띄운다.
+tmux send-keys -t "$SESSION:verifier" \
+    "source $ROS_SETUP && source $VISION_NODE_SETUP && sleep 12 && ros2 launch cup_stacking_verify cup_verify.launch.py rviz:=$VISION_RVIZ tuner:=false use_test_pub:=false" Enter
+
 # hand 카메라는 이번 exo-only 실험에서 기본 미기동 (WITH_HAND_CAM=true 일 때만).
 if [[ "$WITH_HAND_CAM" == "true" ]]; then
     tmux new-window -t "$SESSION" -n "cam-hand"
@@ -121,11 +133,11 @@ echo "======================================================"
 echo " 세션 연결:   tmux attach -t $SESSION"
 echo " 창 전환:     Ctrl+b → 숫자 (또는 창 이름)"
 echo "   rosbridge / cam-exo (eye-to-hand) / vision-exo (depth_digital_twin)"
-echo "   bringup-agent (port 8099) / gripper / server (Docker)"
+echo "   verifier (/stack 판정) / bringup-agent (port 8099) / gripper / server (Docker)"
 if [[ "$WITH_HAND_CAM" == "true" ]]; then
-    echo "   cam-hand (eye-in-hand)  ← WITH_HAND_CAM=true 로 기동됨"
+    echo "   cam-hand (eye-in-hand)  ← 기본 기동 (끄려면 WITH_HAND_CAM=false ./start.sh)"
 else
-    echo "   cam-hand 는 미기동 (필요 시 WITH_HAND_CAM=true ./start.sh)"
+    echo "   cam-hand 는 미기동 (WITH_HAND_CAM=false 로 꺼짐)"
 fi
 echo " ROS_DOMAIN_ID=${ROS_DOMAIN_ID}"
 echo " 세션 종료:   tmux kill-session -t $SESSION"
