@@ -98,6 +98,29 @@ else
     echo "[INFO] vision 빌드 점검 완료."
 fi
 
+# ── ros2-cup-stack(로봇 스택: cup_stack / dsr_practice / doosan / interfaces) ──
+# 빌드 산출물(install)이 '없을 때만' 부트스트랩으로 한 번 빌드한다. gripper·
+# skill_api·fallen_cup recovery 가 이 install 에서 패키지를 찾으므로, 한 번도
+# 빌드 안 된 체크아웃이면 여기서 만들어 준다. 변경이 드물어 매번 빌드하진 않는다.
+#   - 소스를 고쳤는데 반영이 필요하면(예: scan/fallen_cup 동작 변경) 수동으로
+#     'cd ../ros2-cup-stack && colcon build --packages-select <pkg>' 후 재실행.
+#   - FORCE_BUILD=true 면 install 이 있어도 강제로 다시 빌드한다.
+ROS2_CUP_STACK_DIR="$SCRIPT_DIR/../ros2-cup-stack"
+if [[ "${SKIP_BUILD:-false}" != "true" ]]; then
+    if [[ "${FORCE_BUILD:-false}" == "true" || ! -f "$ROS2_CUP_STACK_DIR/install/setup.bash" ]]; then
+        echo "[INFO] ros2-cup-stack 빌드 중 (install 없음 또는 FORCE_BUILD)..."
+        # shellcheck disable=SC1090
+        source "$ROS_SETUP"
+        if ! ( cd "$ROS2_CUP_STACK_DIR" && colcon build --symlink-install ); then
+            echo "[ERROR] ros2-cup-stack colcon build 실패" >&2
+            exit 1
+        fi
+        echo "[INFO] ros2-cup-stack 빌드 완료."
+    else
+        echo "[INFO] ros2-cup-stack 이미 빌드됨 → 생략 (소스 변경 반영은 수동 colcon build)."
+    fi
+fi
+
 # ── 기존 세션 정리 ────────────────────────────────────────
 if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "[INFO] 기존 tmux 세션 '$SESSION' 종료 중..."
