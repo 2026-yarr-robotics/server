@@ -55,32 +55,47 @@ if ! command -v docker &>/dev/null; then
     exit 1
 fi
 
-# ── 정본 vision 패키지 빌드 (소스/config 변경을 확실히 반영) ───────────────
-# 이 스크립트가 source 하는 install/ 은 colcon 산출물이라, 소스를 고쳐도
-# 재빌드하지 않으면 — 특히 params.yaml 같은 config 는 build/ 로 '복사'되므로 —
-# 반영되지 않는다(= "고쳤는데 안 먹는" 문제). 매 기동마다 정본 vision 워크스페이스
-# (recode_sequence / depth_digital_twin / vision-node = cup_stacking_verify)를
-# 빌드해 항상 최신 소스·config 로 노드가 뜨게 한다.
-#   - SKIP_BUILD=true ./start.sh  → 빌드 생략(빠른 재기동, 코드 무변경 시).
+# ── 정본 vision 패키지 빌드 (변경 시에만) ───────────────────────────────────
+# 이 스크립트가 source 하는 install/ 은 colcon 산출물이다. --symlink-install 덕에
+# 파이썬 '소스'(.py) 수정은 재빌드 없이 즉시 반영되지만, params.yaml 같은 config 는
+# build/install 로 '복사'되므로 재빌드해야 반영된다(= "고쳤는데 안 먹는" 문제).
+# 그래서 매번 빌드하지 않고, 워크스페이스별로 src/ 가 마지막 빌드 이후 바뀐 경우에만
+# colcon build 한다 (install/.last_build 스탬프와 mtime 비교; install/ 은 gitignore).
+#   - SKIP_BUILD=true  → 변경이 있어도 전부 생략(가장 빠른 재기동).
+#   - FORCE_BUILD=true → 변경 여부 무관 전부 재빌드.
 #   - ros2-cup-stack(로봇 스택)은 변경이 드물어 자동 빌드 대상에서 제외 — 바뀌면
 #     수동으로 'cd ../ros2-cup-stack && colcon build --symlink-install'.
-if [[ "${SKIP_BUILD:-false}" != "true" ]]; then
-    echo "[INFO] 정본 vision 패키지 빌드 중 (SKIP_BUILD=true 로 생략 가능)..."
+vision_ws_needs_build() {
+    local ws="$1"
+    local stamp="$ws/install/.last_build"
+    [[ -f "$ws/install/setup.bash" ]] || return 0   # 한 번도 빌드 안 됨 → 빌드
+    [[ -f "$stamp" ]] || return 0                    # 스탬프 없음 → 한 번 빌드해 기준 생성
+    # src/ 아래에 스탬프보다 새 파일이 하나라도 있으면 재빌드 (-quit: 첫 매치서 종료)
+    [[ -n "$(find "$ws/src" -type f -newer "$stamp" -print -quit 2>/dev/null)" ]]
+}
+
+if [[ "${SKIP_BUILD:-false}" == "true" ]]; then
+    echo "[INFO] SKIP_BUILD=true → vision 빌드 전부 생략."
+else
+    echo "[INFO] 정본 vision 패키지 점검 중 (변경 시에만 빌드; FORCE_BUILD=true 강제, SKIP_BUILD=true 생략)..."
     # shellcheck disable=SC1090
     source "$ROS_SETUP"
     for ws in \
         "$SCRIPT_DIR/../../vision/ros2-recode-sequence" \
         "$SCRIPT_DIR/../../vision/ros2-depth-point-cloude" \
         "$SCRIPT_DIR/../../vision/vision-node"; do
-        echo "  - colcon build: $ws"
-        if ! ( cd "$ws" && colcon build --symlink-install ); then
-            echo "[ERROR] colcon build 실패: $ws" >&2
-            exit 1
+        if [[ "${FORCE_BUILD:-false}" == "true" ]] || vision_ws_needs_build "$ws"; then
+            echo "  - colcon build: $ws"
+            if ! ( cd "$ws" && colcon build --symlink-install ); then
+                echo "[ERROR] colcon build 실패: $ws" >&2
+                exit 1
+            fi
+            touch "$ws/install/.last_build"
+        else
+            echo "  - 변경 없음 → 빌드 생략: $ws"
         fi
     done
-    echo "[INFO] vision 빌드 완료."
-else
-    echo "[INFO] SKIP_BUILD=true → vision 빌드 생략."
+    echo "[INFO] vision 빌드 점검 완료."
 fi
 
 # ── 기존 세션 정리 ────────────────────────────────────────
