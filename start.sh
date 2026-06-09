@@ -2,8 +2,10 @@
 # start.sh — 컵 스태킹 로봇 시스템 통합 실행 스크립트
 #
 # 사용법:
-#   ./start.sh                     # rosbridge + exo·hand 카메라 + exo perception + bringup-agent + Docker
+#   ./start.sh                     # rosbridge + exo·hand 카메라 + exo perception + bringup-agent + Docker + agent
 #   WITH_HAND_CAM=false ./start.sh # hand 카메라 끄기 (USB 충돌 시)
+#   WITH_AGENT=false ./start.sh    # cup_stack_agent(LLM 폐루프) 창 끄기
+#   AGENT_REAL_API=false ./start.sh# agent 를 dry-run 으로 (로봇 API POST 안 함)
 #
 # bringup은 웹 대시보드(https://yarr.simplyimg.com)에서 버튼으로 제어합니다.
 
@@ -27,6 +29,14 @@ WITH_HAND_CAM="${WITH_HAND_CAM:-true}"
 # 재검출하는 초기화 작업이 필요하므로 기본 on. headless 면 VISION_RVIZ=false.
 VISION_RVIZ="${VISION_RVIZ:-true}"
 
+# cup_stack_agent(LLM 폐루프 실험)도 이 start.sh 가 함께 띄워 단일 진입점이 되게
+# 한다. agent 노드들(aggregator/digital_twin_stabilizer/goal_state_publisher/
+# llm_node/plan_executor[/pick_node])은 'agent' tmux 창에서 cup_stack_agent/start.sh
+# 로 기동된다. WITH_AGENT=false 로 끄고, AGENT_REAL_API=false 면 dry-run(로봇 API
+# POST 안 함; pick_node 미기동).
+WITH_AGENT="${WITH_AGENT:-true}"
+AGENT_REAL_API="${AGENT_REAL_API:-true}"
+
 # ── 사전 확인 ──────────────────────────────────────────────
 if [[ ! -f "$ROS_SETUP" ]]; then
     echo "[ERROR] ROS 2 Humble not found at $ROS_SETUP" >&2
@@ -41,6 +51,34 @@ fi
 if ! command -v docker &>/dev/null; then
     echo "[ERROR] Docker가 설치되지 않았습니다." >&2
     exit 1
+fi
+
+# ── 정본 vision 패키지 빌드 (소스/config 변경을 확실히 반영) ───────────────
+# 이 스크립트가 source 하는 install/ 은 colcon 산출물이라, 소스를 고쳐도
+# 재빌드하지 않으면 — 특히 params.yaml 같은 config 는 build/ 로 '복사'되므로 —
+# 반영되지 않는다(= "고쳤는데 안 먹는" 문제). 매 기동마다 정본 vision 워크스페이스
+# (recode_sequence / depth_digital_twin / vision-node = cup_stacking_verify)를
+# 빌드해 항상 최신 소스·config 로 노드가 뜨게 한다.
+#   - SKIP_BUILD=true ./start.sh  → 빌드 생략(빠른 재기동, 코드 무변경 시).
+#   - ros2-cup-stack(로봇 스택)은 변경이 드물어 자동 빌드 대상에서 제외 — 바뀌면
+#     수동으로 'cd ../ros2-cup-stack && colcon build --symlink-install'.
+if [[ "${SKIP_BUILD:-false}" != "true" ]]; then
+    echo "[INFO] 정본 vision 패키지 빌드 중 (SKIP_BUILD=true 로 생략 가능)..."
+    # shellcheck disable=SC1090
+    source "$ROS_SETUP"
+    for ws in \
+        "$SCRIPT_DIR/../../vision/ros2-recode-sequence" \
+        "$SCRIPT_DIR/../../vision/ros2-depth-point-cloude" \
+        "$SCRIPT_DIR/../../vision/vision-node"; do
+        echo "  - colcon build: $ws"
+        if ! ( cd "$ws" && colcon build --symlink-install ); then
+            echo "[ERROR] colcon build 실패: $ws" >&2
+            exit 1
+        fi
+    done
+    echo "[INFO] vision 빌드 완료."
+else
+    echo "[INFO] SKIP_BUILD=true → vision 빌드 생략."
 fi
 
 # ── 기존 세션 정리 ────────────────────────────────────────
@@ -123,6 +161,22 @@ tmux new-window -t "$SESSION" -n "server"
 tmux send-keys -t "$SESSION:server" \
     "cd $SCRIPT_DIR && docker compose up -d && docker compose logs -f" Enter
 
+# ── 창: cup_stack_agent (LLM 폐루프 실험) ─────────────────
+# cup_stack_agent/start.sh 의 노드들(aggregator/digital_twin_stabilizer/
+# goal_state_publisher/llm_node/plan_executor[/pick_node])을 한 창에서 함께 띄워
+# 이 start.sh 를 단일 진입점으로 만든다. agent 는 실제 로봇 API(localhost nginx
+# :80 → robot:8001)와 vision 파이프라인(/digital_twin/boxes)에 의존하므로 Docker·
+# 카메라·비전이 올라올 시간을 준 뒤 기동한다. pick_node 의 moveit_py 를 위해
+# ros2_ws($DOOSAN_SETUP)도 함께 source 한다.
+if [[ "$WITH_AGENT" == "true" ]]; then
+    AGENT_DIR="$SCRIPT_DIR/../../cup_stack_agent"
+    AGENT_ARGS=""
+    [[ "$AGENT_REAL_API" == "true" ]] && AGENT_ARGS="--real-api"
+    tmux new-window -t "$SESSION" -n "agent"
+    tmux send-keys -t "$SESSION:agent" \
+        "source $ROS_SETUP && source $DOOSAN_SETUP && cd $AGENT_DIR && sleep 25 && ./start.sh $AGENT_ARGS" Enter
+fi
+
 # ── 포커스 ──────────────────────────────────────────────
 tmux select-window -t "$SESSION:rosbridge"
 
@@ -138,6 +192,15 @@ if [[ "$WITH_HAND_CAM" == "true" ]]; then
     echo "   cam-hand (eye-in-hand)  ← 기본 기동 (끄려면 WITH_HAND_CAM=false ./start.sh)"
 else
     echo "   cam-hand 는 미기동 (WITH_HAND_CAM=false 로 꺼짐)"
+fi
+if [[ "$WITH_AGENT" == "true" ]]; then
+    if [[ "$AGENT_REAL_API" == "true" ]]; then
+        echo "   agent (cup_stack_agent, --real-api)  ← LLM 폐루프 (끄려면 WITH_AGENT=false)"
+    else
+        echo "   agent (cup_stack_agent, dry-run)  ← AGENT_REAL_API=true 로 로봇 API 폐루프"
+    fi
+else
+    echo "   agent 는 미기동 (WITH_AGENT=false 로 꺼짐)"
 fi
 echo " ROS_DOMAIN_ID=${ROS_DOMAIN_ID}"
 echo " 세션 종료:   tmux kill-session -t $SESSION"

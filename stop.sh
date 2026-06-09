@@ -22,6 +22,37 @@ if pgrep -f "cup_stack" &>/dev/null; then
     pkill -SIGKILL -f "cup_stack" 2>/dev/null || true
 fi
 
+# ── 1-3. cup_stack_agent (LLM 폐루프 실험 노드) ──────────
+# start.sh 가 'agent' 창에서 함께 띄운 노드들. 노드 명령줄에 'cup_stack' 문자열이
+# 없어(예: python3 scripts/llm_node.py) 위 cup_stack pkill 로 잡히지 않으므로 별도
+# 정리한다. tmux 세션 종료로도 정리되지만 tee/process-substitution 자식이 남을 수
+# 있어 명시적으로 SIGINT→SIGKILL 한다.
+AGENT_PATTERNS=(
+    "cup_stack_agent/start.sh"
+    "fake_aggregator_node.py"
+    "fake_digital_twin_node.py"
+    "fake_hand_eye_node.py"
+    "goal_state_publisher_node.py"
+    "topic_logger_node.py"
+    "llm_node.py"
+    "plan_executor_node.py"
+    "pick_node.py"
+)
+_agent_running=false
+for _pat in "${AGENT_PATTERNS[@]}"; do
+    if pgrep -f "$_pat" &>/dev/null; then _agent_running=true; break; fi
+done
+if [[ "$_agent_running" == true ]]; then
+    echo "[INFO] cup_stack_agent 노드 종료..."
+    for _pat in "${AGENT_PATTERNS[@]}"; do
+        pkill -SIGINT -f "$_pat" 2>/dev/null || true
+    done
+    sleep 2
+    for _pat in "${AGENT_PATTERNS[@]}"; do
+        pkill -SIGKILL -f "$_pat" 2>/dev/null || true
+    done
+fi
+
 # ── 2. RealSense 카메라 ──────────────────────────────────
 if pgrep -f "realsense2_camera" &>/dev/null; then
     echo "[INFO] RealSense 카메라 종료..."
