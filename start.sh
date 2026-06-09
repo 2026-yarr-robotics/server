@@ -185,13 +185,25 @@ tmux send-keys -t "$SESSION:server" \
 # :80 → robot:8001)와 vision 파이프라인(/digital_twin/boxes)에 의존하므로 Docker·
 # 카메라·비전이 올라올 시간을 준 뒤 기동한다. pick_node 의 moveit_py 를 위해
 # ros2_ws($DOOSAN_SETUP)도 함께 source 한다.
+#
+# 통합 기동은 'agent 준비 환경'만 띄우고 skill(예: 3단 피라미드)을 자동 실행하지
+# 않는다 — 실제 명령은 런타임에 대시보드 명령창(POST /api/robot/command ->
+# /user_command) 또는 루트의 send_command.sh 에서 들어온다. cup_stack_agent 는
+# 수정하지 않고 여기(server/start.sh)에서만 막는다:
+#   - cup_stack_agent/start.sh 의 USER_COMMAND 기본값은 '3단 피라미드 쌓아줘'
+#     하드코딩이고 ${USER_COMMAND:-...} 는 '빈 문자열'을 그 기본값으로 치환한다.
+#   - 그래서 빈 문자열 대신 '공백 한 칸'을 넘긴다. aggregator 는 그대로 발행하지만
+#     goal_state_publisher 가 `msg.data.strip() or None` 로 공백을 None 처리 →
+#     user_command=None → 콜드스타트(플랜 null), 자동 발사 없음.
+# (자동 발행이 필요하면 USER_COMMAND="3단 쌓아줘" WITH_AGENT=true 로 override.)
 if [[ "$WITH_AGENT" == "true" ]]; then
     AGENT_DIR="$SCRIPT_DIR/../../cup_stack_agent"
     AGENT_ARGS=""
     [[ "$AGENT_REAL_API" == "true" ]] && AGENT_ARGS="--real-api"
+    AGENT_USER_COMMAND="${USER_COMMAND:- }"   # 기본 공백 = 자동 발행 안 함
     tmux new-window -t "$SESSION" -n "agent"
     tmux send-keys -t "$SESSION:agent" \
-        "source $ROS_SETUP && source $DOOSAN_SETUP && cd $AGENT_DIR && sleep 25 && ./start.sh $AGENT_ARGS" Enter
+        "source $ROS_SETUP && source $DOOSAN_SETUP && cd $AGENT_DIR && sleep 25 && USER_COMMAND='$AGENT_USER_COMMAND' ./start.sh $AGENT_ARGS" Enter
 fi
 
 # ── 포커스 ──────────────────────────────────────────────
