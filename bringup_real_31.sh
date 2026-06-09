@@ -27,7 +27,8 @@
 ROBOT_IP=${1:-192.168.1.100}
 
 # 스크립트 실제 위치 — $HOME 하드코딩 대신 여기서부터 경로를 계산한다.
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# readlink -f: 루트의 심볼릭 링크(./bringup_real.sh)로 실행돼도 실제 server/ 경로를 잡는다.
+SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 
 source /opt/ros/humble/setup.bash
 # MoveIt 코어 베이스 (moveit_core / moveit_py / moveit_ros_planning 등)

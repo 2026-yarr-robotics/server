@@ -12,7 +12,9 @@
 set -e
 
 ROS_SETUP="/opt/ros/humble/setup.bash"
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# readlink -f 로 심볼릭 링크(루트의 ./start.sh)를 실제 server/ 경로로 resolve한다.
+# 안 하면 링크로 실행 시 SCRIPT_DIR 이 repo 루트가 돼 ../../vision 등이 어긋난다.
+SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 SESSION="cup-stack"
 
 # 모든 ROS 노드가 같은 도메인에서 통신하도록 일관 적용한다 (.bashrc 와 동일값).

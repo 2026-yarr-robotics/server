@@ -2,7 +2,8 @@
 # stop.sh — 컵 스태킹 로봇 시스템 전체 종료 스크립트
 
 SESSION="cup-stack"
-SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# readlink -f: 루트의 심볼릭 링크(./stop.sh)로 실행돼도 실제 server/ 경로를 잡는다.
+SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 
 echo "[INFO] 컵 스태킹 시스템 종료 중..."
 
