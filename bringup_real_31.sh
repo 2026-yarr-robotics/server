@@ -66,9 +66,19 @@ pkill -f "ros2_control_node.*__ns:=/dsr01"            2>/dev/null || true
 pkill -f "robot_state_publisher.*__ns:=/dsr01"        2>/dev/null || true
 pkill -f "controller_manager/spawner.*__ns:=/dsr01"   2>/dev/null || true
 pkill -f "rviz2 .*__ns:=/dsr01"                       2>/dev/null || true
+# skill_api_node(=skill_api_server)는 init 때 MoveItPy 를 controller_manager 에
+# 바인딩한다. 이 bringup 이후에도 '예전' skill_api 가 살아 있으면 (start.sh 가
+# bringup 보다 먼저 떴거나 병렬로 떠서) 죽은 옛 controller_manager 를 붙들고 있어
+# 모든 pick/scan 이 execute 단계에서 ABORT 한다. 그래서 bringup 이 (재)시작될 때마다
+# skill_api 도 함께 정리한다 — 다음 skill 호출에서 서버가 '이 bringup' 에 바인딩된
+# 새 skill_api 를 lazy 재기동하므로, start.sh ↔ bringup 실행 순서·동시성과 무관하게
+# 동작한다.
+pkill -f "skill_api_server"                            2>/dev/null || true
+pkill -f "skill_api\.launch\.py"                       2>/dev/null || true
 sleep 2
 pkill -9 -f "ros2_control_node.*__ns:=/dsr01"         2>/dev/null || true
 pkill -9 -f "robot_state_publisher.*__ns:=/dsr01"     2>/dev/null || true
+pkill -9 -f "skill_api_server"                         2>/dev/null || true
 sleep 1
 
 echo "[REAL] DSR M0609 Bringup 시작 (mode=real, host=${ROBOT_IP})"
