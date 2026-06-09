@@ -105,9 +105,16 @@ if tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 
 echo "[INFO] tmux 세션 '$SESSION' 시작..."
-tmux new-session -d -s "$SESSION" -x 220 -y 50 -n "rosbridge"
+tmux new-session -d -s "$SESSION" -x 220 -y 50 -n "server"
+
+# ── 창 1: Docker 서버 (nginx + FastAPI + cloudflared) ────
+# -d 로 컨테이너를 분리 실행 → tmux 세션이 종료돼도 컨테이너가 유지됨.
+# 첫 창(#1)으로 둬서 attach 시 바로 서버 로그가 보인다.
+tmux send-keys -t "$SESSION:server" \
+    "cd $SCRIPT_DIR && docker compose up -d && docker compose logs -f" Enter
 
 # ── 창 rosbridge ──────────────────────────────────────────
+tmux new-window -t "$SESSION" -n "rosbridge"
 tmux send-keys -t "$SESSION:rosbridge" \
     "bash $SCRIPT_DIR/rosbridge.sh" Enter
 
@@ -172,11 +179,7 @@ tmux new-window -t "$SESSION" -n "gripper"
 tmux send-keys -t "$SESSION:gripper" \
     "source $ROS_SETUP && source $DOOSAN_SETUP && source $ROS2_CUP_STACK_SETUP && ros2 launch cup_stack gripper.launch.py" Enter
 
-# ── 창 4: Docker 서버 (nginx + FastAPI + cloudflared) ────
-# -d 로 컨테이너를 분리 실행 → tmux 세션이 종료돼도 컨테이너가 유지됨
-tmux new-window -t "$SESSION" -n "server"
-tmux send-keys -t "$SESSION:server" \
-    "cd $SCRIPT_DIR && docker compose up -d && docker compose logs -f" Enter
+# (Docker 서버 창은 창 #1 로 이동했다 — 세션 생성부 참고.)
 
 # ── 창: cup_stack_agent (LLM 폐루프 실험) ─────────────────
 # cup_stack_agent/start.sh 의 노드들(aggregator/digital_twin_stabilizer/
@@ -207,7 +210,7 @@ if [[ "$WITH_AGENT" == "true" ]]; then
 fi
 
 # ── 포커스 ──────────────────────────────────────────────
-tmux select-window -t "$SESSION:rosbridge"
+tmux select-window -t "$SESSION:server"
 
 echo ""
 echo "======================================================"
