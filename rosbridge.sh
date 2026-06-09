@@ -5,7 +5,15 @@ ROS_SETUP="/opt/ros/humble/setup.bash"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CUP_STACK_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 DOOSAN_SETUP="$HOME/ros2_ws/install/setup.bash"
+# colcon's install dir location differs between checkouts: the integration
+# checkout builds to ros2-cup-stack/install, the deploy checkout also has
+# ros2-cup-stack/ros2/install. Prefer the ros2/ workspace install, then fall
+# back to the top-level install so cup_stack_interfaces lands on PYTHONPATH
+# (rosbridge's ros_loader imports cup_stack_interfaces.srv for /gripper_control).
 ROS2_CUP_STACK_SETUP="$CUP_STACK_ROOT/ros2-cup-stack/ros2/install/setup.bash"
+if [[ ! -f "$ROS2_CUP_STACK_SETUP" ]]; then
+    ROS2_CUP_STACK_SETUP="$CUP_STACK_ROOT/ros2-cup-stack/install/setup.bash"
+fi
 
 if [[ ! -f "$ROS_SETUP" ]]; then
     echo "ERROR: ROS 2 Humble not found at $ROS_SETUP" >&2
