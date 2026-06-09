@@ -22,6 +22,7 @@ class RosBridge:
         self._config = config
         self._ros: roslibpy.Ros | None = None
         self._subscribers: dict[str, roslibpy.Topic] = {}
+        self._publishers: dict[str, roslibpy.Topic] = {}
 
     @classmethod
     def get(cls, config: RosBridgeConfig | None = None) -> RosBridge:
@@ -68,6 +69,9 @@ class RosBridge:
             for topic in self._subscribers.values():
                 topic.unsubscribe()
             self._subscribers.clear()
+            for topic in self._publishers.values():
+                topic.unadvertise()
+            self._publishers.clear()
             self._ros.close()
             self._ros = None
 
@@ -99,6 +103,24 @@ class RosBridge:
         sub = self._subscribers.pop(topic_name, None)
         if sub is not None:
             sub.unsubscribe()
+
+    def publish(
+        self,
+        topic_name: str,
+        msg_type: str,
+        message: dict[str, Any],
+    ) -> None:
+        """Publish a single message to a ROS topic over rosbridge.
+
+        The advertised ``roslibpy.Topic`` is cached and reused per topic
+        name (mirrors the subscriber cache).
+        """
+        pub = self._publishers.get(topic_name)
+        if pub is None:
+            pub = roslibpy.Topic(self.ros, topic_name, msg_type)
+            pub.advertise()
+            self._publishers[topic_name] = pub
+        pub.publish(roslibpy.Message(message))
 
     async def call_service(
         self,

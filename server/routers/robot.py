@@ -34,6 +34,8 @@ from ..schemas import (
     TaskStartRequest,
     TaskStopRequest,
     TaskStoppedResponse,
+    UserCommandRequest,
+    UserCommandResponse,
     WorkspaceLimitsResponse,
 )
 
@@ -182,6 +184,24 @@ async def move_robot(body: MoveRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/command", response_model=UserCommandResponse)
+async def send_user_command(body: UserCommandRequest) -> dict:
+    """자연어 명령을 LLM 에이전트 루프로 전달한다.
+
+    원문 텍스트를 ``/user_command`` (``std_msgs/String``) 토픽으로 발행한다.
+    프론트엔드 Command 박스에서 ``/`` 접두 없이 입력한 일반 텍스트가 여기로
+    들어온다 (``/`` 접두는 직접 로봇 명령용).
+    """
+    text = body.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text must not be empty")
+    domain = _get_domain()
+    try:
+        return await domain.send_user_command(text)
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
 
 
 @router.get("/pixel-to-world", response_model=PixelToWorldResponse)

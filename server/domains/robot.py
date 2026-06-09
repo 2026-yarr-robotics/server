@@ -398,6 +398,22 @@ class RobotDomain:
         )
         return result if result else {"success": False, "message": "Service call failed"}
 
+    async def send_user_command(self, text: str) -> dict[str, Any]:
+        """Forward a natural-language command to the LLM agent loop.
+
+        Publishes the raw text on ``/user_command`` (``std_msgs/msg/String``),
+        the single world-state input perception cannot supply. The
+        goal_state_publisher → llm_node planner consumes it.
+        """
+        if not self._bridge.connected:
+            raise ConnectionError("rosbridge not connected")
+        self._bridge.publish(
+            "/user_command",
+            "std_msgs/msg/String",
+            {"data": text},
+        )
+        return {"success": True, "message": f"user command published: {text}"}
+
     async def get_log(self, name: str, tail: int = 50) -> list[str]:
         return await self._launcher.get_log(name, tail)
 

@@ -205,6 +205,26 @@ class MoveResponse(BaseModel):
     })
 
 
+class UserCommandRequest(BaseModel):
+    text: str = Field(
+        ...,
+        description="자연어 명령. /user_command (std_msgs/String) 으로 발행되어 "
+        "LLM 에이전트(goal_state_publisher → llm_node)가 소비한다.",
+    )
+
+    model_config = _example({"text": "3단 피라미드 쌓아줘"})
+
+
+class UserCommandResponse(BaseModel):
+    success: bool
+    message: str
+
+    model_config = _example({
+        "success": True,
+        "message": "user command published: 3단 피라미드 쌓아줘",
+    })
+
+
 # ── Cup Detection ─────────────────────────────────────────────────────────────
 
 class PixelPoint(BaseModel):
