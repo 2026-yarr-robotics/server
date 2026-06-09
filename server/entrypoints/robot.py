@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import urllib.request
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -218,6 +220,52 @@ def create_app() -> FastAPI:
             pass
         except Exception:
             logger.exception("task log ws error")
+            await ws.close(code=1011)
+
+    @app.websocket("/ws/agent/log")
+    async def ws_agent_log(ws: WebSocket) -> None:
+        # Streams the cup_stack_agent LLM-loop logs (llm_node / plan_executor /
+        # pick_node / goal_state_publisher). The agent writes them to the HOST
+        # filesystem; this service is containerised, so it proxies the host
+        # bringup-agent's GET /agent/log (reusing the configured agent_url) and
+        # forwards new lines ~1Hz. Mirrors the /ws/task/log streaming pattern.
+        await ws.accept()
+        agent_url = _launcher.agent_url if _launcher is not None else None
+        if not agent_url:
+            await ws.close(code=503, reason="No bringup agent (BRINGUP_AGENT_URL)")
+            return
+
+        loop = asyncio.get_running_loop()
+        cursor = 0.0
+        limit = 80  # first fetch: send recent tail for context
+
+        try:
+            while True:
+                url = f"{agent_url}/agent/log?since={cursor}"
+                if limit:
+                    url += f"&limit={limit}"
+
+                def _fetch(u: str = url) -> dict:
+                    with urllib.request.urlopen(u, timeout=5) as resp:
+                        return json.loads(resp.read())
+
+                try:
+                    data = await loop.run_in_executor(None, _fetch)
+                    cursor = data.get("cursor", cursor)
+                    lines = data.get("lines", [])
+                    if lines or limit:
+                        await ws.send_json(
+                            {"run_id": data.get("run_id"), "lines": lines}
+                        )
+                    limit = 0  # subsequent fetches are incremental
+                except Exception as exc:  # noqa: BLE001 — keep the socket alive
+                    logger.warning("agent log poll error: %s", exc)
+
+                await asyncio.sleep(1.0)
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            logger.exception("agent log ws error")
             await ws.close(code=1011)
 
     @app.websocket("/ws/cups")

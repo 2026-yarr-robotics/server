@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import signal
 import socketserver
 import subprocess
@@ -35,6 +36,94 @@ PORT = 8099
 _SCRIPT_DIR = Path(__file__).resolve().parent
 CUP_STACK_DIR = _SCRIPT_DIR.parent / "ros2-cup-stack" / "ros2" / "src" / "cup_stack"
 ROS2_WORKSPACE = CUP_STACK_DIR.parent.parent  # ros2-cup-stack/ros2/
+
+# ── cup_stack_agent LLM-loop logs ──────────────────────────────────────────────
+# The agent (cup_stack_agent) writes per-node logs to
+# <integration-repo>/cup_stack_agent/logs/<RUN_ID>/*.log. bringup_agent.py lives at
+# <integration-repo>/cup-stack-server/server/bringup_agent.py, so the logs dir is
+# two levels up from server/. Override the location with AGENT_LOGS_DIR.
+AGENT_LOGS_DIR = Path(
+    os.environ.get(
+        "AGENT_LOGS_DIR",
+        str(_SCRIPT_DIR.parent.parent / "cup_stack_agent" / "logs"),
+    )
+)
+
+# Per-node log files surfaced to the dashboard, ordered most-useful-first for
+# following the loop. Missing files are skipped silently.
+_AGENT_LOG_FILES = (
+    "goal_state_publisher.log",
+    "llm_node.log",
+    "plan_executor.log",
+    "pick_node.log",
+)
+
+# Matches "[LEVEL] [<unix_ts>] [<node>]: <message>" — the rclpy log format the
+# agent nodes emit. The unix timestamp doubles as a monotonic stream cursor.
+_AGENT_LINE_RE = re.compile(
+    r"^\[(?P<level>[A-Z]+)\]\s+\[(?P<ts>\d+(?:\.\d+)?)\]\s+"
+    r"\[(?P<node>[^\]]+)\]:\s?(?P<msg>.*)$"
+)
+
+
+def _latest_agent_run() -> Path | None:
+    """Newest cup_stack_agent/logs/<RUN_ID>/ dir, or None if none exist."""
+    try:
+        runs = [d for d in AGENT_LOGS_DIR.iterdir() if d.is_dir()]
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    if not runs:
+        return None
+    return max(runs, key=lambda d: d.stat().st_mtime)
+
+
+def _collect_agent_log(since: float, limit: int) -> dict[str, Any]:
+    """Merge the latest run's per-node logs, tag by node, return new-since lines.
+
+    *since* is the unix-timestamp cursor returned by a previous call (0 → first
+    fetch: only the tail of *limit* lines is returned). The response cursor is the
+    newest timestamp seen so the caller can poll incrementally.
+    """
+    run = _latest_agent_run()
+    if run is None:
+        return {"run_id": None, "cursor": since, "lines": []}
+
+    entries: list[dict[str, Any]] = []
+    for fname in _AGENT_LOG_FILES:
+        try:
+            text = (run / fname).read_text(errors="replace")
+        except OSError:
+            continue
+        node_fallback = fname[:-4]  # strip ".log"
+        last: dict[str, Any] | None = None
+        for raw in text.splitlines():
+            m = _AGENT_LINE_RE.match(raw)
+            if m:
+                last = {
+                    "ts": float(m.group("ts")),
+                    "node": m.group("node"),
+                    "level": m.group("level"),
+                    "text": m.group("msg"),
+                }
+                entries.append(last)
+            elif last is not None:
+                # Continuation line (multi-line LLM output / traceback): fold
+                # into the preceding entry so it streams atomically.
+                last["text"] += "\n" + raw
+            elif raw.strip():
+                entries.append(
+                    {"ts": 0.0, "node": node_fallback, "level": "INFO", "text": raw}
+                )
+
+    entries.sort(key=lambda e: e["ts"])
+    max_ts = entries[-1]["ts"] if entries else since
+
+    if since > 0:
+        new = [e for e in entries if e["ts"] > since]
+    else:
+        new = entries[-limit:]
+
+    return {"run_id": run.name, "cursor": max_ts, "lines": new}
 
 # Pattern matching the host bringup launch process. Used by /status to
 # surface externally-started bringup (e.g. bringup_real.sh run from a
@@ -156,6 +245,17 @@ class _Handler(BaseHTTPRequestHandler):
                 status = _task_statuses.get(name, "idle")
                 log = list(_task_logs.get(name, [])[-50:])
             self._json({"status": status, "log": log})
+        elif path == "/agent/log":
+            try:
+                since = float(params.get("since", "0") or 0)
+            except ValueError:
+                since = 0.0
+            try:
+                limit = int(params.get("limit", "80") or 80)
+            except ValueError:
+                limit = 80
+            limit = max(1, min(limit, 500))
+            self._json(_collect_agent_log(since, limit))
         else:
             self._json({"error": "not found"}, 404)
 
