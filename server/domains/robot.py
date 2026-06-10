@@ -652,17 +652,24 @@ class RobotDomain:
         z: float | None = None,
         nested_count: int | None = None,
         ori: dict[str, float] | None = None,
+        nested: int = 1,
     ) -> dict[str, Any]:
         """Proxy a single-cup pick to the ROS 2 skill_api_node.
 
-        Coordinates are the **cup top centre** (base_link, m).  Supply
-        one of:
+        Coordinates are the **cup top centre** (base_link, m).  Z is
+        resolved by the ROS 2 skill node with precedence
+        ``z`` > ``cup_top_z`` > ``nested_count``:
 
         * ``cup_top_z`` — cup-top Z; skill node adds ``cup_grip_z_offset``.
         * ``z`` — raw gripper Z, no offset.
         * ``nested_count`` — number of nested cups in the source stack;
           skill node derives the gripper Z from
           ``pick_z_base + (nested_count - 1) * nest_inc``.
+        * ``nested`` — same semantics as ``nested_count`` but with a
+          default of 1; used when ``nested_count`` is not supplied. The
+          effective nested count (``nested_count`` if given else
+          ``nested``) is always sent as ``nested_count`` to the ROS node,
+          which is harmless when ``z`` / ``cup_top_z`` win the precedence.
 
         Cup-stack geometry constants intentionally live in ROS 2
         (`cup_stack.skills.config.SkillStackConfig`).
@@ -671,19 +678,18 @@ class RobotDomain:
         bringup agent) and left running for subsequent picks.
 
         Raises:
-            ValueError: none of ``cup_top_z`` / ``z`` / ``nested_count``
-                supplied, or ``nested_count`` < 1.
+            ValueError: ``nested_count`` < 1 or ``nested`` < 1.
             ConnectionError: skill_api_node unreachable, or could not be
                 started / did not become ready (see message).
             RuntimeError: skill node returned an HTTP error
                 (message is ``"<status>: <body>"``).
         """
-        if cup_top_z is None and z is None and nested_count is None:
-            raise ValueError(
-                "provide 'cup_top_z', 'z', or 'nested_count'"
-            )
         if nested_count is not None and nested_count < 1:
             raise ValueError("'nested_count' must be >= 1")
+        if nested < 1:
+            raise ValueError("'nested' must be >= 1")
+
+        effective_nested = nested_count if nested_count is not None else nested
 
         await self._ensure_skill_api()
 
@@ -692,8 +698,7 @@ class RobotDomain:
             payload["z"] = z
         if cup_top_z is not None:
             payload["cup_top_z"] = cup_top_z
-        if nested_count is not None:
-            payload["nested_count"] = nested_count
+        payload["nested_count"] = effective_nested
         if ori is not None:
             payload["ori"] = ori
 

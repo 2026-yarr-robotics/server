@@ -233,6 +233,7 @@ async def skill_pick(body: PickSkillRequest) -> dict:
             z=body.z,
             nested_count=body.nested_count,
             ori=body.ori,
+            nested=body.nested,
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))

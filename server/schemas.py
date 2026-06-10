@@ -463,7 +463,8 @@ class PickSkillRequest(BaseModel):
     skill_api_node가 ``gripper_z = cup_top_z + cup_grip_z_offset``로
     변환한다. ``z``(그리퍼 raw Z)를 직접 줄 수도 있고, ``nested_count``를
     주면 skill_api_node가 ``pick_z_base + (nested_count - 1) * nest_inc``로
-    그리퍼 Z를 산출한다. 셋 중 하나는 필수.
+    그리퍼 Z를 산출한다. ``z`` / ``cup_top_z`` / ``nested_count`` 중
+    어느 것도 주지 않으면 ``nested``(기본 1)로 Z를 산출한다.
     """
 
     x: float = Field(..., description="컵 윗면 중앙 X (base_link, m)")
@@ -477,6 +478,11 @@ class PickSkillRequest(BaseModel):
     nested_count: Optional[int] = Field(
         None, ge=1,
         description="소스 스택에 nested 컵 개수. ROS 2 skill_api_node가 Z를 산출",
+    )
+    nested: int = Field(
+        1, ge=1,
+        description="source nest 에 남은 컵 수 (1=맨 아래 한 개). nested_count "
+        "미지정 시 이 값으로 Z 산출 (pick_z_base + (nested-1)*nest_inc). 기본 1.",
     )
     ori: Optional[dict] = Field(
         None, description="그리퍼 방향 quaternion {x,y,z,w}; 미지정 시 down"
