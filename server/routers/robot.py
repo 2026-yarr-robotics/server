@@ -34,6 +34,8 @@ from ..schemas import (
     TaskStartRequest,
     TaskStopRequest,
     TaskStoppedResponse,
+    UnstackSkillRequest,
+    UnstackSkillResponse,
     UserCommandRequest,
     UserCommandResponse,
     WorkspaceLimitsResponse,
@@ -278,7 +280,28 @@ async def skill_pyramid(body: PyramidSkillRequest) -> dict:
     """
     domain = _get_domain()
     try:
-        return await domain.pyramid_skill(body.x, body.y, body.slot)
+        return await domain.pyramid_skill(body.x, body.y, body.slot, body.nested)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except ConnectionError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except RuntimeError as e:
+        msg = str(e)
+        status = 409 if msg.startswith("409") else 502
+        raise HTTPException(status_code=status, detail=msg)
+
+
+@router.post("/skill/unstack", response_model=UnstackSkillResponse)
+async def skill_unstack(body: UnstackSkillRequest) -> dict:
+    """피라미드 slot 의 컵 하나를 집어 목적지 (x,y) 에 nested 컬럼으로 place.
+
+    pyramid skill 의 역동작. pick 좌표(slot 절대 위치)·pick_z 는 서버의
+    /config/pyramid 캐시에서, 목적지 place_z 는 ``nested`` 로부터 계산한다.
+    피라미드는 위에서부터(3m → 2r/2l → 1r/1m/1l) 해체해야 한다.
+    """
+    domain = _get_domain()
+    try:
+        return await domain.unstack_skill(body.slot, body.x, body.y, body.nested)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
     except ConnectionError as e:

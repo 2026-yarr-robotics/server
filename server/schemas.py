@@ -568,8 +568,15 @@ class PyramidSkillRequest(BaseModel):
     slot: PyramidSlotKey = Field(
         ..., description="놓을 슬롯 키: 1l/1m/1r (bottom), 2l/2r (mid), 3m (top)"
     )
+    nested: int = Field(
+        1,
+        ge=1,
+        description="source nest 에 남은 컵 수 (1=맨 아래 한 개). "
+        "pick_z = pick_z + (nested-1)*nest_inc 로 위 컵부터 집는다. "
+        "기본 1 → 기존 동작과 동일.",
+    )
 
-    model_config = _example({"x": 0.40, "y": 0.10, "slot": "1l"})
+    model_config = _example({"x": 0.40, "y": 0.10, "slot": "1l", "nested": 1})
 
 
 class PyramidSkillResponse(BaseModel):
@@ -581,6 +588,46 @@ class PyramidSkillResponse(BaseModel):
         "success": True,
         "skill": "pyramid",
         "detail": "slot=1l pick=(0.40,0.10,0.313) place=(0.50,-0.079,0.323)",
+    })
+
+
+# ── Unstack Skill ─────────────────────────────────────────────────────────────
+
+class UnstackSkillRequest(BaseModel):
+    """POST /api/robot/skill/unstack 본문. pick 할 slot + 목적지 nest XY.
+
+    pyramid skill 의 역동작: 피라미드 slot 에 놓인 컵을 집어 목적지 (x, y)
+    에 nested 컬럼으로 쌓는다. pick 좌표(slot 절대 위치)·pick_z 는 서버의
+    /api/robot/config/pyramid 캐시에서 자동으로 가져온다.
+
+    피라미드는 위에서부터 해체해야 하므로 호출 순서는 3m → 2r → 2l →
+    1r → 1m → 1l 이어야 한다 (호출자 책임).
+    """
+
+    slot: PyramidSlotKey = Field(
+        ..., description="집을 슬롯 키: 3m (top) → 2r/2l (mid) → 1r/1m/1l (bottom)"
+    )
+    x: float = Field(..., description="목적지 nest 중앙 X (base_link, m)")
+    y: float = Field(..., description="목적지 nest 중앙 Y (base_link, m)")
+    nested: int = Field(
+        1,
+        ge=1,
+        description="이 컵을 놓은 뒤 목적지 컬럼 높이 (1=맨 아래 첫 컵). "
+        "place_z = pick_z + (nested-1)*nest_inc 로 컵이 위로 nesting 된다.",
+    )
+
+    model_config = _example({"slot": "3m", "x": 0.40, "y": 0.10, "nested": 1})
+
+
+class UnstackSkillResponse(BaseModel):
+    success: bool
+    skill: str = "unstack"
+    detail: str = ""
+
+    model_config = _example({
+        "success": True,
+        "skill": "unstack",
+        "detail": "slot=3m pick=(0.50,0.000,0.513) place=(0.40,0.10,0.313)",
     })
 
 

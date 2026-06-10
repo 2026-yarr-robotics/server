@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -95,6 +95,110 @@ class TestPyramidConfigEndpoint:
         assert data["slots"]["1l"]["y"] == -0.079
         assert data["slots"]["1m"]["x"] == 0.45
         assert data["slots"]["1m"]["y"] == 0.0
+
+
+class TestPyramidSkillNested:
+    """POST /api/robot/skill/pyramid 의 nested 파라미터 (기본 1, 하위호환)."""
+
+    def test_pyramid_default_nested_keeps_base_pick_z(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        robot_domain._ensure_skill_api = AsyncMock()
+        robot_domain._post_pyramid_step = AsyncMock(
+            return_value={"success": True, "skill": "pyramid", "detail": ""}
+        )
+        # nested 미지정 → 기존과 동일하게 pick_z == pyramid_pick_z(0.313).
+        resp = client.post(
+            "/api/robot/skill/pyramid",
+            json={"x": 0.40, "y": 0.10, "slot": "1l"},
+        )
+        assert resp.status_code == 200
+        payload = robot_domain._post_pyramid_step.call_args[0][0]
+        assert payload["pick_z"] == pytest.approx(0.313)
+
+    def test_pyramid_nested_raises_pick_z(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        robot_domain._ensure_skill_api = AsyncMock()
+        robot_domain._post_pyramid_step = AsyncMock(
+            return_value={"success": True, "skill": "pyramid", "detail": ""}
+        )
+        resp = client.post(
+            "/api/robot/skill/pyramid",
+            json={"x": 0.40, "y": 0.10, "slot": "1l", "nested": 6},
+        )
+        assert resp.status_code == 200
+        payload = robot_domain._post_pyramid_step.call_args[0][0]
+        # nested=6 → pick_z = 0.313 + 5 * 0.0127
+        assert payload["pick_z"] == pytest.approx(0.313 + 5 * 0.0127)
+
+    def test_pyramid_nested_below_one_returns_422(self, client: TestClient):
+        resp = client.post(
+            "/api/robot/skill/pyramid",
+            json={"x": 0.40, "y": 0.10, "slot": "1l", "nested": 0},
+        )
+        assert resp.status_code == 422
+
+
+class TestUnstackSkillEndpoint:
+    """POST /api/robot/skill/unstack — pyramid skill 의 역동작."""
+
+    def test_unstack_picks_slot_and_nests_at_destination(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        # skill_api 호출은 mock: 픽업/배치 좌표가 올바른지만 검증.
+        robot_domain._ensure_skill_api = AsyncMock()
+        robot_domain._post_pyramid_step = AsyncMock(
+            return_value={"success": True, "skill": "pyramid", "detail": ""}
+        )
+
+        resp = client.post(
+            "/api/robot/skill/unstack",
+            json={"slot": "3m", "x": 0.40, "y": 0.10, "nested": 1},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+        payload = robot_domain._post_pyramid_step.call_args[0][0]
+        # pick = 캐시된 3m 슬롯 절대 좌표 (center 0.45,0.0 / degree 90 / 2층)
+        assert payload["x"] == pytest.approx(0.45)
+        assert payload["y"] == pytest.approx(0.0)
+        assert payload["pick_z"] == pytest.approx(0.504)  # 0.318 + 2*0.093
+        # place = 목적지 nest, nested=1 → place_z = pick_z(0.313)
+        assert payload["place_x"] == pytest.approx(0.40)
+        assert payload["place_y"] == pytest.approx(0.10)
+        assert payload["place_z"] == pytest.approx(0.313)
+        assert payload["slot"] == "3m"
+
+    def test_unstack_place_z_grows_with_nested(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        robot_domain._ensure_skill_api = AsyncMock()
+        robot_domain._post_pyramid_step = AsyncMock(
+            return_value={"success": True, "skill": "pyramid", "detail": ""}
+        )
+        resp = client.post(
+            "/api/robot/skill/unstack",
+            json={"slot": "1l", "x": 0.40, "y": 0.10, "nested": 3},
+        )
+        assert resp.status_code == 200
+        payload = robot_domain._post_pyramid_step.call_args[0][0]
+        # nested=3 → place_z = 0.313 + 2 * 0.0127 (working nest_inc, 12.7mm)
+        assert payload["place_z"] == pytest.approx(0.313 + 2 * 0.0127)
+
+    def test_unstack_invalid_slot_returns_422(self, client: TestClient):
+        resp = client.post(
+            "/api/robot/skill/unstack",
+            json={"slot": "9z", "x": 0.40, "y": 0.10, "nested": 1},
+        )
+        assert resp.status_code == 422
+
+    def test_unstack_nested_below_one_returns_422(self, client: TestClient):
+        resp = client.post(
+            "/api/robot/skill/unstack",
+            json={"slot": "3m", "x": 0.40, "y": 0.10, "nested": 0},
+        )
+        assert resp.status_code == 422
 
 
 class TestTaskLogEndpoint:

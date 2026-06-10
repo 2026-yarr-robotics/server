@@ -44,6 +44,11 @@ PYRAMID_LAYER_HEIGHT = 0.093
 PYRAMID_PLACE_Z_BASE = 0.318
 DEFAULT_PYRAMID_DEGREE = 90.0
 DEFAULT_PYRAMID_PICK_Z = 0.313  # SkillStackConfig.pick_z_base
+# Per-cup nest increment (m) for the unstack destination column. 12.7 mm is the
+# working cup geometry used by every launch invocation and the interactive
+# cup_{pyramid,unstack}_select nodes (`nest_inc:=0.0127`); the 0.012 fallback
+# baked into the plain nodes / skill_api.launch.py is always overridden at launch.
+DEFAULT_NEST_INC = 0.0127
 PYRAMID_SLOT_OFFSETS: dict[str, tuple[float, int]] = {
     "1l": (-PYRAMID_CUP_SPACING,      0),
     "1m": (0.0,                       0),
@@ -861,6 +866,7 @@ class RobotDomain:
         x: float,
         y: float,
         slot: str,
+        nested: int = 1,
     ) -> dict[str, Any]:
         """Proxy a single pyramid pick-and-place to ROS 2 skill_api_node.
 
@@ -868,9 +874,18 @@ class RobotDomain:
         and forwards both the pick (x,y,pick_z) and the absolute place
         (from the cached slot table) to /skill/pyramid_step.
 
+        ``nested`` is the number of cups remaining in the *source* nest at
+        ``(x, y)``: the top cup sits ``(nested - 1) * DEFAULT_NEST_INC``
+        above the bottom one, so::
+
+            pick_z = pyramid_pick_z + (nested - 1) * DEFAULT_NEST_INC
+
+        Defaults to 1 → ``pick_z == pyramid_pick_z`` (unchanged behaviour),
+        so existing callers that omit ``nested`` are unaffected.
+
         Raises:
-            ValueError: invalid slot key, pick XY outside workspace, or
-                pyramid center unavailable.
+            ValueError: invalid slot key, pick XY/Z outside workspace,
+                ``nested`` < 1, or pyramid center unavailable.
             ConnectionError: skill_api_node unreachable / not ready.
             RuntimeError: skill_api_node returned an HTTP error.
         """
@@ -879,10 +894,20 @@ class RobotDomain:
                 f"invalid slot '{slot}'; expected one of "
                 f"{sorted(PYRAMID_SLOT_OFFSETS)}"
             )
+        if nested < 1:
+            raise ValueError("'nested' must be >= 1")
         if not (self._move_limits.x_min <= x <= self._move_limits.x_max
                 and self._move_limits.y_min <= y <= self._move_limits.y_max):
             raise ValueError(
                 f"pick ({x:.3f},{y:.3f}) outside workspace XY limits"
+            )
+
+        pick_z = self._pyramid_pick_z + (nested - 1) * DEFAULT_NEST_INC
+        if not (self._move_limits.z_min <= pick_z <= self._move_limits.z_max):
+            raise ValueError(
+                f"pick_z={pick_z:.3f} (nested={nested}) outside workspace Z "
+                f"limits [{self._move_limits.z_min:.3f},"
+                f"{self._move_limits.z_max:.3f}]"
             )
 
         self._ensure_pyramid_center()
@@ -893,13 +918,95 @@ class RobotDomain:
         payload = {
             "x": float(x),
             "y": float(y),
-            "pick_z": self._pyramid_pick_z,
+            "pick_z": pick_z,
             "place_x": place["x"],
             "place_y": place["y"],
             "place_z": place["z"],
             "slot": slot,
         }
 
+        logger.info("pyramid_skill (nested=%d) -> %s", nested, payload)
+        return await self._post_pyramid_step(payload)
+
+    async def unstack_skill(
+        self,
+        slot: str,
+        x: float,
+        y: float,
+        nested: int = 1,
+    ) -> dict[str, Any]:
+        """Pick the cup sitting in a pyramid ``slot`` and nest it at (x, y).
+
+        The inverse of :meth:`pyramid_skill`: instead of spreading a cup
+        from a source nest into a pyramid slot, this lifts the cup *out*
+        of a slot (using the slot's cached absolute pose as the pick
+        pose) and releases it into a destination nested column at
+        ``(x, y)``.
+
+        ``nested`` is the destination column height *after* this cup is
+        added (1 = first/bottom cup).  The release Z grows with the
+        column so each cup nests on top of the previous one::
+
+            place_z = pyramid_pick_z + (nested - 1) * DEFAULT_NEST_INC
+
+        Unstacking must proceed top-down (3m → 2r/2l → 1r/1m/1l); the
+        caller is responsible for that ordering.
+
+        Args:
+            slot: slot to pick from (1l/1m/1r/2l/2r/3m).
+            x, y: destination nest XY (base_link, m).
+            nested: destination column height after placing (>= 1).
+
+        Raises:
+            ValueError: invalid slot, destination XY/Z outside workspace,
+                or ``nested`` < 1.
+            ConnectionError: skill_api_node unreachable / not ready.
+            RuntimeError: skill_api_node returned an HTTP error.
+        """
+        if slot not in PYRAMID_SLOT_OFFSETS:
+            raise ValueError(
+                f"invalid slot '{slot}'; expected one of "
+                f"{sorted(PYRAMID_SLOT_OFFSETS)}"
+            )
+        if nested < 1:
+            raise ValueError("'nested' must be >= 1")
+        if not (self._move_limits.x_min <= x <= self._move_limits.x_max
+                and self._move_limits.y_min <= y <= self._move_limits.y_max):
+            raise ValueError(
+                f"destination ({x:.3f},{y:.3f}) outside workspace XY limits"
+            )
+
+        self._ensure_pyramid_center()
+        pick = self._pyramid_slots[slot]
+
+        place_z = self._pyramid_pick_z + (nested - 1) * DEFAULT_NEST_INC
+        if not (self._move_limits.z_min <= place_z <= self._move_limits.z_max):
+            raise ValueError(
+                f"destination place_z={place_z:.3f} (nested={nested}) outside "
+                f"workspace Z limits [{self._move_limits.z_min:.3f},"
+                f"{self._move_limits.z_max:.3f}]"
+            )
+
+        await self._ensure_skill_api()
+
+        payload = {
+            "x": pick["x"],
+            "y": pick["y"],
+            "pick_z": pick["z"],
+            "place_x": float(x),
+            "place_y": float(y),
+            "place_z": place_z,
+            "slot": slot,
+        }
+        logger.info("unstack_skill (nested=%d) -> %s", nested, payload)
+        return await self._post_pyramid_step(payload)
+
+    async def _post_pyramid_step(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """POST a fully-resolved pick/place to skill_api_node /skill/pyramid_step.
+
+        Shared by :meth:`pyramid_skill` (build) and :meth:`unstack_skill`
+        (teardown): both reduce to one ``PlaceCupAtSkill`` pick→place→home.
+        """
         url = f"{self._skill_api_url}/skill/pyramid_step"
         req = urllib.request.Request(
             url,
@@ -922,7 +1029,6 @@ class RobotDomain:
                     f"{exc.reason}"
                 ) from exc
 
-        logger.info("pyramid_skill -> %s %s", url, payload)
         return await loop.run_in_executor(None, _call)
 
     # ── Scan skill ───────────────────────────────────────────────────────────
