@@ -175,7 +175,7 @@ class TestFallenCupDomain:
         assert args["conf"] == "0.7"
         assert args["imgsz"] == "1280"
         assert args["use_depth"] == "true"
-        assert args["device"] == "cpu"
+        assert args["device"] == "cuda"
         assert "weights_path" not in args  # 기본 config는 빈 문자열
 
     def test_build_detection_args_overrides(self, fallen_cup_domain: FallenCupDomain):

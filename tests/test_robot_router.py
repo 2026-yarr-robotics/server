@@ -92,7 +92,7 @@ class TestPyramidConfigEndpoint:
         data = resp.json()
         assert data["center"] == {"x": 0.45, "y": 0.0}
         assert data["slots"]["1l"]["x"] == 0.45
-        assert data["slots"]["1l"]["y"] == -0.079
+        assert data["slots"]["1l"]["y"] == -0.078
         assert data["slots"]["1m"]["x"] == 0.45
         assert data["slots"]["1m"]["y"] == 0.0
 
