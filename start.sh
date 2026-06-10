@@ -30,6 +30,20 @@ WITH_HAND_CAM="${WITH_HAND_CAM:-true}"
 # 잡는데, RViz 로 world 축이 로봇 base 와 맞는지 확인하고 Redetect 팝업으로
 # 재검출하는 초기화 작업이 필요하므로 기본 on. headless 면 VISION_RVIZ=false.
 VISION_RVIZ="${VISION_RVIZ:-true}"
+# 비전 파이프라인 모드. standalone = 단일 exo 카메라(검증된 production 9Hz
+# baseline). fusion = exo point_cloud를 producer 로 돌리고 cup_fusion_node 가
+# /digital_twin/boxes + /vision/cups_on_table 를 소유(검증된 exo-only 색계약).
+# hand dual-cam 은 eye-in-hand 캘리브/TF dedup 선결이라 여기 미포함.
+VISION_MODE="${VISION_MODE:-fusion_dual}"
+# standalone | fusion(exo-only producer+cup_fusion) | fusion_dual(exo+hand)
+case "$VISION_MODE" in
+  fusion)      VISION_FUSION=true;  VISION_WITH_HAND=false ;;
+  fusion_dual) VISION_FUSION=true;  VISION_WITH_HAND=true  ;;
+  *)           VISION_FUSION=false; VISION_WITH_HAND=false ;;
+esac
+# eye-in-hand world<->base_link yaw 보정 노브(도). RViz 에서 hand 컵이 exo 컵과
+# 안 겹치면 90 / -90 / 180 으로 바꿔 재실행.
+VISION_WORLD_BASE_YAW="${VISION_WORLD_BASE_YAW:-0}"
 
 # cup_stack_agent(LLM 폐루프 실험)도 이 start.sh 가 함께 띄워 단일 진입점이 되게
 # 한다. agent 노드들(aggregator/digital_twin_stabilizer/goal_state_publisher/
@@ -169,7 +183,7 @@ tmux new-window -t "$SESSION" -n "vision-exo"
 # 카메라가 /exo/exo/* 발행을 시작할 시간을 준 뒤 파이프라인을 띄운다
 # (world_origin_node 의 ArUco 타임아웃이 카메라 부팅 전에 도는 것 방지).
 tmux send-keys -t "$SESSION:vision-exo" \
-    "source $ROS_SETUP && source $DEPTH_DT_SETUP && sleep 8 && ros2 launch depth_digital_twin digital_twin.launch.py camera_ns:=exo rviz:=$VISION_RVIZ" Enter
+    "source $ROS_SETUP && source $DEPTH_DT_SETUP && sleep 8 && ros2 launch depth_digital_twin digital_twin.launch.py camera_ns:=exo rviz:=$VISION_RVIZ fusion:=$VISION_FUSION" Enter
 
 # ── 창: stack verifier (cup_stacking_verify) ──────────────
 # /digital_twin/boxes 를 받아 어느 슬롯이 채워졌는지 판정해 /vision/stack(+
@@ -182,6 +196,16 @@ tmux new-window -t "$SESSION" -n "verifier"
 # vision-exo 가 /digital_twin/boxes 를 내보낸 뒤 띄운다.
 tmux send-keys -t "$SESSION:verifier" \
     "source $ROS_SETUP && source $VISION_NODE_SETUP && sleep 12 && ros2 launch cup_stacking_verify cup_verify.launch.py rviz:=$VISION_RVIZ tuner:=false use_test_pub:=false" Enter
+
+# ── 창: hand-fusion (VISION_MODE=fusion_dual 일 때만) ──────
+# hand 카메라 producer + eye-in-hand 정적 TF(handeye, world<->base_link)를 띄워
+# cup_fusion 이 exo+hand 를 융합한다. robot_state_publisher 를 따로 안 띄우고 dsr
+# 의 live TF 를 재사용 → TF 충돌 없음. yaw 는 VISION_WORLD_BASE_YAW 노브.
+if [[ "$VISION_WITH_HAND" == "true" ]]; then
+    tmux new-window -t "$SESSION" -n "hand-fusion"
+    tmux send-keys -t "$SESSION:hand-fusion" \
+        "source $ROS_SETUP && source $DEPTH_DT_SETUP && sleep 16 && ros2 launch depth_digital_twin hand_fusion_add.launch.py view:=exo world_base_yaw_deg:=$VISION_WORLD_BASE_YAW" Enter
+fi
 
 # hand 카메라는 이번 exo-only 실험에서 기본 미기동 (WITH_HAND_CAM=true 일 때만).
 if [[ "$WITH_HAND_CAM" == "true" ]]; then

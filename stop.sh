@@ -4,7 +4,10 @@
 # start.sh 가 tmux 세션 'cup-stack' 에 띄우는 모든 창/프로세스를 정리한다:
 #   rosbridge      rosbridge_websocket
 #   cam-exo/cam-hand   realsense2_camera (D435i 2대)
-#   vision-exo     depth_digital_twin (world_origin/detection/point_cloud/control) + RViz
+#   vision-exo     depth_digital_twin (world_origin/detection/point_cloud/cup_fusion)
+#                  + 패널(fusion: digital_twin_panel / standalone: world_origin_control) + RViz
+#   hand-fusion    (VISION_MODE=fusion_dual) hand_fusion_add.launch.py:
+#                  depth_digital_twin detection/point_cloud(hand) + tf2_ros 정적 TF 2개
 #   verifier       cup_stacking_verify (boxes_to_detections/verifier/topic_logger/pose_tuner) + RViz
 #   bringup-agent  bringup_agent.py (포트 8099)
 #   gripper        ros2 launch cup_stack gripper.launch.py
@@ -35,16 +38,37 @@ PATTERNS=(
     # cup_stack 모션 태스크 + gripper.launch.py (ros2 launch cup_stack ...)
     # — 'cup_stacking_verify' 도 substring 으로 함께 잡히지만 아래에 명시도 한다.
     "cup_stack"
-    # vision: exo perception (depth_digital_twin) — 노드 + launch
+    # 넘어진 컵 복구 태스크 (대시보드 fallen-cup). cup_stack 의
+    # fallen_cup_recovery/detect.launch.py 가 dsr_practice / speed_stack_yolo_seg
+    # 패키지 노드로 위임하는데, 그 노드 실행파일 cmdline 은 .../ros2-cup-stack/
+    # install/<pkg>/lib/<pkg>/<exe> 라 'cup_stack'(언더스코어)이 없어 위 패턴에
+    # 안 잡혀 stop 후에도 잔존한다. 실행파일명으로 직접 정리한다:
+    #   stand_fallen_cup(+_moveit_py) — /dsr01/*, /moveit_cpp/*, /tf 소유
+    #   fallen_cup_pose_node          — /fallen_cup/*, /hand/hand/* 구독
+    "stand_fallen_cup"
+    "fallen_cup_pose_node"
+    # vision: exo perception — depth_digital_twin 의 모든 노드(world_origin/
+    # detection/point_cloud/cup_fusion)와 패널(digital_twin_panel 또는
+    # world_origin_control), 그리고 digital_twin.launch.py / hand_fusion_add
+    # .launch.py launch 프로세스까지 cmdline 에 'depth_digital_twin' 이 들어가
+    # 한 패턴으로 모두 잡힌다.
     "depth_digital_twin"
-    "digital_twin.launch.py"
+    "digital_twin.launch.py"      # (명시용; 위 패턴에 이미 포함)
+    "hand_fusion_add.launch.py"   # hand-fusion 창 launch (VISION_MODE=fusion_dual)
+    # hand-fusion 의 eye-in-hand 정적 TF (handeye, world<->base_link) — tf2_ros
+    # 실행파일이라 'depth_digital_twin' 패턴에 안 잡혀 별도로 정리한다.
+    "static_transform_publisher"
     # vision: stack verifier (cup_stacking_verify) — 노드 + launch
     "cup_stacking_verify"
     "cup_verify.launch.py"
     # vision RViz 창 2개 (digital_twin.rviz / cup_verify.rviz)
     "rviz2"
-    # RealSense 카메라 (cam-exo, cam-hand)
+    # RealSense 카메라 (cam-exo, cam-hand) — realsense2_camera_node 노드
     "realsense2_camera"
+    # 카메라 launch 부모 (ros2 launch recode_sequence cameras_only.launch.py
+    # view:=exo|hand). cmdline 에 'realsense2_camera' 가 없어 위 패턴에 안 잡혀
+    # 별도로 정리한다 (안 그러면 launch 부모가 노드 종료 후에도 잔존).
+    "cameras_only.launch.py"
     # rosbridge (rosbridge_websocket_launch.xml → rosbridge_websocket 노드)
     "rosbridge_websocket"
     # bringup 에이전트 (포트 8099)
