@@ -35,6 +35,19 @@ echo "[INFO] 컵 스태킹 시스템 종료 중..."
 PATTERNS=(
     # 로봇 드라이버 (대시보드 Bringup 버튼으로 기동)
     "dsr_bringup2"
+    # DSR controller/service leftovers. These can survive ordinary launch
+    # shutdown and leave /dsr01/controller_manager half-alive; then
+    # dsr_moveit_controller never exposes follow_joint_trajectory and
+    # /skill/pyramid hangs until nginx 504. Kill them explicitly.
+    "ros2_control_node.*__ns:=/dsr01"
+    "robot_state_publisher.*__ns:=/dsr01"
+    "controller_manager/spawner.*dsr_moveit_controller"
+    "controller_manager/spawner.*__ns:=/dsr01"
+    "ros2 control list_controllers"
+    # skill API may be launched outside the tmux window and can keep waiting
+    # forever for the stale controller action server.
+    "skill_api_server"
+    "skill_api.launch.py"
     # cup_stack 모션 태스크 + gripper.launch.py (ros2 launch cup_stack ...)
     # — 'cup_stacking_verify' 도 substring 으로 함께 잡히지만 아래에 명시도 한다.
     "cup_stack"
@@ -75,8 +88,11 @@ PATTERNS=(
     "bringup_agent.py"
     # cup_stack_agent (LLM 폐루프) 노드들 — cwd 상대경로라 파일명으로 매칭
     "fake_aggregator_node.py"
+    "aggregator_node.py"
     "fake_digital_twin_node.py"
+    "digital_twin_stabilizer_node.py"
     "fake_hand_eye_node.py"
+    "upright_cup_pose_node.py"
     "goal_state_publisher_node.py"
     "topic_logger_node.py"
     "llm_node.py"
@@ -111,7 +127,17 @@ if docker compose -f "$SCRIPT_DIR/docker-compose.yml" ps -q 2>/dev/null | grep -
     docker compose -f "$SCRIPT_DIR/docker-compose.yml" down
 fi
 
-# ── 3. tmux 세션 ─────────────────────────────────────────
+# ── 3. FastDDS shared-memory 찌꺼기 정리 ───────────────────
+# stop 후에도 /dev/shm/fastrtps_* lock 파일이 남으면 새 ROS 2 participant 들이
+# 서로 discover 되지 않아 /user_command 같은 one-shot 토픽이 유실될 수 있다.
+# 이 시스템을 완전히 내리는 스크립트라 기본 정리한다. 필요 시
+# CLEAN_FASTDDS_SHM=false ./stop.sh 로 끌 수 있다.
+if [[ "${CLEAN_FASTDDS_SHM:-true}" == "true" ]]; then
+    echo "[INFO] FastDDS /dev/shm 찌꺼기 정리..."
+    rm -f /dev/shm/fastrtps_* /dev/shm/fastrtps_port* 2>/dev/null || true
+fi
+
+# ── 4. tmux 세션 ─────────────────────────────────────────
 if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "[INFO] tmux 세션 '$SESSION' 종료..."
     tmux kill-session -t "$SESSION"

@@ -20,6 +20,8 @@ SESSION="cup-stack"
 # 모든 ROS 노드가 같은 도메인에서 통신하도록 일관 적용한다 (.bashrc 와 동일값).
 # 이 export 는 tmux 서버가 상속하므로 아래 모든 창의 셸에 전파된다.
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-21}"
+# All ROS nodes run on this host; keep DDS discovery off Docker/Tailscale/robot NICs.
+export ROS_LOCALHOST_ONLY=1
 
 # hand 카메라 기본 기동(on). 단 같은 호스트에서 D435i 2대(exo+hand)가 USB
 # 자원을 다투면 "resource busy"/SIGSEGV 가 날 수 있으므로, 문제 시
@@ -34,7 +36,7 @@ VISION_RVIZ="${VISION_RVIZ:-true}"
 # baseline). fusion = exo point_cloud를 producer 로 돌리고 cup_fusion_node 가
 # /digital_twin/boxes + /vision/cups_on_table 를 소유(검증된 exo-only 색계약).
 # hand dual-cam 은 eye-in-hand 캘리브/TF dedup 선결이라 여기 미포함.
-VISION_MODE="${VISION_MODE:-fusion_dual}"
+VISION_MODE="${VISION_MODE:-fusion}"
 # standalone | fusion(exo-only producer+cup_fusion) | fusion_dual(exo+hand)
 case "$VISION_MODE" in
   fusion)      VISION_FUSION=true;  VISION_WITH_HAND=false ;;
@@ -183,7 +185,7 @@ tmux new-window -t "$SESSION" -n "vision-exo"
 # 카메라가 /exo/exo/* 발행을 시작할 시간을 준 뒤 파이프라인을 띄운다
 # (world_origin_node 의 ArUco 타임아웃이 카메라 부팅 전에 도는 것 방지).
 tmux send-keys -t "$SESSION:vision-exo" \
-    "source $ROS_SETUP && source $DEPTH_DT_SETUP && sleep 8 && ros2 launch depth_digital_twin digital_twin.launch.py camera_ns:=exo rviz:=$VISION_RVIZ fusion:=$VISION_FUSION" Enter
+    "source $ROS_SETUP && source $DEPTH_DT_SETUP && sleep 8 && ros2 launch depth_digital_twin digital_twin.launch.py camera_ns:=exo rviz:=$VISION_RVIZ control_panel:=false fusion:=$VISION_FUSION" Enter
 
 # ── 창: stack verifier (cup_stacking_verify) ──────────────
 # /digital_twin/boxes 를 받아 어느 슬롯이 채워졌는지 판정해 /vision/stack(+

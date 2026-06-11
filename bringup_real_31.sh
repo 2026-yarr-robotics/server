@@ -31,6 +31,9 @@ ROBOT_IP=${1:-192.168.1.100}
 SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 
 source /opt/ros/humble/setup.bash
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-21}"
+# DSR/MoveIt/skill_api run on this host; avoid FastDDS discovery on external NICs.
+export ROS_LOCALHOST_ONLY=1
 # MoveIt 코어 베이스 (moveit_core / moveit_py / moveit_ros_planning 등)
 [[ -f "$HOME/ros2_ws/install/setup.bash" ]] && source "$HOME/ros2_ws/install/setup.bash"
 # 프로젝트 오버레이 — 마지막에 source 해 프로젝트 빌드본이 우선하도록 한다.
@@ -65,6 +68,10 @@ pkill -f "dsr_bringup2_rviz\.launch\.py"              2>/dev/null || true
 pkill -f "ros2_control_node.*__ns:=/dsr01"            2>/dev/null || true
 pkill -f "robot_state_publisher.*__ns:=/dsr01"        2>/dev/null || true
 pkill -f "controller_manager/spawner.*__ns:=/dsr01"   2>/dev/null || true
+pkill -f "controller_manager/spawner.*dsr_moveit_controller" 2>/dev/null || true
+pkill -f "skill_api_server"                           2>/dev/null || true
+pkill -f "skill_api.launch.py"                         2>/dev/null || true
+pkill -f "ros2 control list_controllers"                2>/dev/null || true
 pkill -f "rviz2 .*__ns:=/dsr01"                       2>/dev/null || true
 sleep 2
 pkill -9 -f "ros2_control_node.*__ns:=/dsr01"         2>/dev/null || true
@@ -73,14 +80,17 @@ sleep 1
 
 echo "[REAL] DSR M0609 Bringup 시작 (mode=real, host=${ROBOT_IP})"
 
-# dsr_bringup2_rviz.launch.py only spawns joint_state_broadcaster + dsr_controller2.
-# MoveIt needs dsr_moveit_controller (JTC) too; skill_api.launch.py normally
-# spawns it, but if skill_api_node is already running from an earlier session,
-# restarting bringup leaves the JTC unspawned and every pick aborts at step 1
-# with "Action client not connected". Spawner polls for the controller_manager
-# service and self-exits on activation, so it's safe to background here.
-( ros2 run controller_manager spawner dsr_moveit_controller \
-    --controller-manager /dsr01/controller_manager ) &
+# dsr_bringup2_rviz.launch.py does not start the CupStack skill API.
+# skill_api.launch.py owns MoveItPy and also spawns dsr_moveit_controller, so
+# keep them coupled here. Without this, start.sh + bringup_real_31.sh can leave
+# /api/robot/skill/pyramid with no backend and pick_node waits until nginx 504.
+(
+    sleep 8
+    echo "[REAL] Skill API 시작 (cup_stack skill_api.launch.py)"
+    ros2 launch cup_stack skill_api.launch.py
+) &
+SKILL_API_LAUNCH_PID=$!
+trap 'kill ${SKILL_API_LAUNCH_PID:-} 2>/dev/null || true' EXIT INT TERM
 
 ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py \
     model:=m0609 \
