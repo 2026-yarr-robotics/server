@@ -228,32 +228,37 @@ tmux send-keys -t "$SESSION:gripper" \
 
 # (Docker 서버 창은 창 #1 로 이동했다 — 세션 생성부 참고.)
 
-# ── 창: cup_stack_agent (LLM 폐루프 실험) ─────────────────
-# cup_stack_agent/start.sh 의 노드들(aggregator/digital_twin_stabilizer/
-# goal_state_publisher/llm_node/plan_executor[/pick_node])을 한 창에서 함께 띄워
-# 이 start.sh 를 단일 진입점으로 만든다. agent 는 실제 로봇 API(localhost nginx
-# :80 → robot:8001)와 vision 파이프라인(/digital_twin/boxes)에 의존하므로 Docker·
-# 카메라·비전이 올라올 시간을 준 뒤 기동한다. pick_node 의 moveit_py 를 위해
-# ros2_ws($DOOSAN_SETUP)도 함께 source 한다.
+# ── 창: vision-relay (cup_stack_agent vision 그룹 — agent 와 분리, 항상 기동) ──
+# cup_stack_agent/start.sh 의 WITH_LLM=false 모드: aggregator(/vision/cups_on_table·
+# /vision/stack → /cups_on_table·/stack 중계) + digital_twin_stabilizer +
+# hand-eye pose 소스만 띄운다. Ollama 불필요 → WITH_AGENT=false 여도 vision
+# 중계 토픽이 항상 살아 있다. stale-process cleanup 은 그룹별로 스코프되므로
+# agent 창과 서로 죽이지 않는다.
 #
-# 통합 기동은 'agent 준비 환경'만 띄우고 skill(예: 3단 피라미드)을 자동 실행하지
-# 않는다 — 실제 명령은 런타임에 대시보드 명령창(POST /api/robot/command ->
-# /user_command) 또는 루트의 send_command.sh 에서 들어온다. cup_stack_agent 는
-# 수정하지 않고 여기(server/start.sh)에서만 막는다:
+# USER_COMMAND 공백-한-칸 트릭은 aggregator 가 여기서 뜨므로 이 창에 적용한다:
 #   - cup_stack_agent/start.sh 의 USER_COMMAND 기본값은 '3단 피라미드 쌓아줘'
 #     하드코딩이고 ${USER_COMMAND:-...} 는 '빈 문자열'을 그 기본값으로 치환한다.
 #   - 그래서 빈 문자열 대신 '공백 한 칸'을 넘긴다. aggregator 는 그대로 발행하지만
 #     goal_state_publisher 가 `msg.data.strip() or None` 로 공백을 None 처리 →
 #     user_command=None → 콜드스타트(플랜 null), 자동 발사 없음.
 # (자동 발행이 필요하면 USER_COMMAND="3단 쌓아줘" WITH_AGENT=true 로 override.)
+AGENT_DIR="$SCRIPT_DIR/../../cup_stack_agent"
+AGENT_USER_COMMAND="${USER_COMMAND:- }"   # 기본 공백 = 자동 발행 안 함
+tmux new-window -t "$SESSION" -n "vision-relay"
+tmux send-keys -t "$SESSION:vision-relay" \
+    "source $ROS_SETUP && source $DOOSAN_SETUP && cd $AGENT_DIR && sleep 20 && USER_COMMAND='$AGENT_USER_COMMAND' WITH_LLM=false ./start.sh" Enter
+
+# ── 창: cup_stack_agent (LLM 폐루프만 — GSP/llm_node/plan_executor[/pick_node]) ──
+# vision 노드들은 위 vision-relay 창에서 상시 기동하므로 여기선 WITH_VISION=false.
+# agent 는 실제 로봇 API(localhost nginx :80 → robot:8001)와 vision 파이프라인
+# (/digital_twin/boxes)에 의존하므로 Docker·카메라·비전이 올라올 시간을 준 뒤
+# 기동한다. pick_node 의 moveit_py 를 위해 ros2_ws($DOOSAN_SETUP)도 source 한다.
 if [[ "$WITH_AGENT" == "true" ]]; then
-    AGENT_DIR="$SCRIPT_DIR/../../cup_stack_agent"
     AGENT_ARGS=""
     [[ "$AGENT_REAL_API" == "true" ]] && AGENT_ARGS="--real-api"
-    AGENT_USER_COMMAND="${USER_COMMAND:- }"   # 기본 공백 = 자동 발행 안 함
     tmux new-window -t "$SESSION" -n "agent"
     tmux send-keys -t "$SESSION:agent" \
-        "source $ROS_SETUP && source $DOOSAN_SETUP && cd $AGENT_DIR && sleep 25 && USER_COMMAND='$AGENT_USER_COMMAND' ./start.sh $AGENT_ARGS" Enter
+        "source $ROS_SETUP && source $DOOSAN_SETUP && cd $AGENT_DIR && sleep 25 && WITH_VISION=false ./start.sh $AGENT_ARGS" Enter
 fi
 
 # ── 포커스 ──────────────────────────────────────────────
@@ -266,7 +271,8 @@ echo "======================================================"
 echo " 세션 연결:   tmux attach -t $SESSION"
 echo " 창 전환:     Ctrl+b → 숫자 (또는 창 이름)"
 echo "   rosbridge / cam-exo (eye-to-hand) / vision-exo (depth_digital_twin)"
-echo "   verifier (/stack 판정) / bringup-agent (port 8099) / gripper / server (Docker)"
+echo "   verifier (/stack 판정) / vision-relay (aggregator·stabilizer·hand-eye, 항상 기동)"
+echo "   bringup-agent (port 8099) / gripper / server (Docker)"
 if [[ "$WITH_HAND_CAM" == "true" ]]; then
     echo "   cam-hand (eye-in-hand)  ← 기본 기동 (끄려면 WITH_HAND_CAM=false ./start.sh)"
 else
