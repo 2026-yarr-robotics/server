@@ -63,20 +63,8 @@ def create_app() -> FastAPI:
         )
         _launcher.start_agent_reconcile()
 
-        try:
-            bridge = await connect_bridge(settings.rosbridge)
-        except Exception:
-            logger.warning(
-                "rosbridge unavailable at %s:%d; starting without ROS. "
-                "Docs/OpenAPI are served; ROS-backed endpoints return 503 "
-                "until the service is restarted with rosbridge up.",
-                settings.rosbridge.host,
-                settings.rosbridge.port,
-                exc_info=True,
-            )
-            bridge = None
-
-        if bridge is not None:
+        def _wire_domains(bridge) -> None:
+            global _domain, _fallen_cup_domain
             _domain = RobotDomain(
                 bridge,
                 _launcher,
@@ -101,9 +89,44 @@ def create_app() -> FastAPI:
             _fallen_cup_domain.subscribe()
             set_fallen_cup_domain(_fallen_cup_domain)
 
+        try:
+            bridge = await connect_bridge(settings.rosbridge)
+        except Exception:
+            logger.warning(
+                "rosbridge unavailable at %s:%d; starting without ROS — "
+                "retrying in the background until it comes up "
+                "(ROS-backed endpoints return 503 meanwhile).",
+                settings.rosbridge.host,
+                settings.rosbridge.port,
+                exc_info=True,
+            )
+            bridge = None
+
+        retry_task: asyncio.Task | None = None
+        if bridge is not None:
+            _wire_domains(bridge)
+        else:
+            # 컨테이너가 호스트 rosbridge 보다 먼저 뜨면(브링업 레이스, 컨테이너
+            # 단독 재시작) 도메인이 영구 미설정으로 남아 모든 ROS 엔드포인트가
+            # 재시작 전까지 503 이었다 — 연결될 때까지 백그라운드 재시도.
+            async def _retry_wire() -> None:
+                while True:
+                    await asyncio.sleep(3.0)
+                    try:
+                        b = await connect_bridge(settings.rosbridge)
+                    except Exception:
+                        continue
+                    _wire_domains(b)
+                    logger.info("rosbridge connected — ROS domains wired")
+                    return
+
+            retry_task = asyncio.create_task(_retry_wire())
+
         logger.info("robot service started on port %d", settings.ports.robot)
         yield
 
+        if retry_task is not None and not retry_task.done():
+            retry_task.cancel()
         await _launcher.shutdown_all()
         try:
             await disconnect_bridge()
