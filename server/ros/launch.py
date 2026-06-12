@@ -18,7 +18,7 @@ from ..config import WorkspaceConfig
 logger = logging.getLogger(__name__)
 
 BRINGUP_COMMANDS = {"bringup_sim", "bringup_real"}
-SERVICE_COMMANDS = {"cup_detection", "gripper", "skill_api", "fallen_cup_detect"}
+SERVICE_COMMANDS = {"gripper", "skill_api", "fallen_cup_detect"}
 # gripper: Modbus-only, no MoveItPy conflict.
 # skill_api: long-lived pick / pyramid server, lazily started by
 #   RobotDomain.pick_skill / pyramid_skill.

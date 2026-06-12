@@ -14,14 +14,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from ..access_log import APIAccessLogMiddleware
 from ..config import AppSettings
-from ..domains.cup_detection import CupDetectionDomain
 from ..domains.fallen_cup import FallenCupDomain
 from ..domains.robot import RobotDomain
 from ..ros.bridge import RosBridge, connect_bridge, disconnect_bridge
 from ..ros.launch import LaunchManager
 from ..routers.robot import (
     router as robot_router,
-    set_cup_detection_domain,
     set_fallen_cup_domain,
     set_robot_domain,
 )
@@ -49,7 +47,6 @@ settings.fallen_cup = _FCC(
 
 _domain: RobotDomain | None = None
 _launcher: LaunchManager | None = None
-_cup_domain: CupDetectionDomain | None = None
 _fallen_cup_domain: FallenCupDomain | None = None
 
 
@@ -58,7 +55,7 @@ def create_app() -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        global _domain, _launcher, _cup_domain, _fallen_cup_domain
+        global _domain, _launcher, _fallen_cup_domain
 
         _launcher = LaunchManager(
             settings.workspace,
@@ -95,10 +92,6 @@ def create_app() -> FastAPI:
             _domain.subscribe()
             set_robot_domain(_domain)
 
-            _cup_domain = CupDetectionDomain(bridge, _launcher)
-            _cup_domain.subscribe()
-            set_cup_detection_domain(_cup_domain)
-
             _fallen_cup_domain = FallenCupDomain(
                 bridge,
                 _launcher,
@@ -131,9 +124,7 @@ def create_app() -> FastAPI:
             "`GET /api/robot/status`와 동일(`RobotStatusResponse`), 약 100ms"
             "(10Hz) 주기 push.\n"
             "- `ws://<host>/ws/task/log` — 실행 태스크 로그 증분 스트림 "
-            "(`{task, status, log[]}`), 약 500ms 주기.\n"
-            "- `ws://<host>/ws/cups` — 컵 감지 프레임 스트림 "
-            "(`CupDetectionFrame`), 약 100ms 주기.\n\n"
+            "(`{task, status, log[]}`), 약 500ms 주기.\n\n"
             "프로덕션은 `wss://<도메인>/ws/robot/state` 처럼 nginx/터널 경유.\n"
         ),
         # Serve docs under the /api/robot prefix so nginx's existing
@@ -266,22 +257,6 @@ def create_app() -> FastAPI:
             pass
         except Exception:
             logger.exception("agent log ws error")
-            await ws.close(code=1011)
-
-    @app.websocket("/ws/cups")
-    async def ws_cups(ws: WebSocket) -> None:
-        await ws.accept()
-        if _cup_domain is None:
-            await ws.close(code=503, reason="Not initialized")
-            return
-        try:
-            while True:
-                await ws.send_json(_cup_domain.get_cups())
-                await asyncio.sleep(0.1)
-        except WebSocketDisconnect:
-            pass
-        except Exception:
-            logger.exception("cups ws error")
             await ws.close(code=1011)
 
     return app

@@ -4,13 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from ..domains.cup_detection import CupDetectionDomain
 from ..domains.fallen_cup import FallenCupDomain
 from ..domains.robot import RobotDomain
 from ..ros.launch import ALL_COMMANDS
 from ..schemas import (
     BringupRequest,
-    CupDetectionFrame,
     EEPositionSchema,
     FallenCupDetectionStartRequest,
     FallenCupRecoveryRequest,
@@ -44,18 +42,12 @@ from ..schemas import (
 router = APIRouter(prefix="/api/robot", tags=["robot"])
 
 robot_domain: RobotDomain | None = None
-cup_detection_domain: CupDetectionDomain | None = None
 fallen_cup_domain: FallenCupDomain | None = None
 
 
 def set_robot_domain(domain: RobotDomain) -> None:
     global robot_domain
     robot_domain = domain
-
-
-def set_cup_detection_domain(domain: CupDetectionDomain) -> None:
-    global cup_detection_domain
-    cup_detection_domain = domain
 
 
 def set_fallen_cup_domain(domain: FallenCupDomain) -> None:
@@ -67,12 +59,6 @@ def _get_domain() -> RobotDomain:
     if robot_domain is None:
         raise HTTPException(status_code=503, detail="Robot domain not initialized")
     return robot_domain
-
-
-def _get_cup_domain() -> CupDetectionDomain:
-    if cup_detection_domain is None:
-        raise HTTPException(status_code=503, detail="Cup detection domain not initialized")
-    return cup_detection_domain
 
 
 def _get_fallen_cup_domain() -> FallenCupDomain:
@@ -349,11 +335,6 @@ async def skill_scan_square() -> dict:
         msg = str(e)
         status = 409 if msg.startswith("409") else 502
         raise HTTPException(status_code=status, detail=msg)
-
-
-@router.get("/cups", response_model=CupDetectionFrame)
-async def get_cups() -> dict:
-    return _get_cup_domain().get_cups()
 
 
 # ── Fallen Cup ────────────────────────────────────────────────────────────────

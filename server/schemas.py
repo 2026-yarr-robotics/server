@@ -225,65 +225,6 @@ class UserCommandResponse(BaseModel):
     })
 
 
-# ── Cup Detection ─────────────────────────────────────────────────────────────
-
-class PixelPoint(BaseModel):
-    x: float = Field(..., description="픽셀 X")
-    y: float = Field(..., description="픽셀 Y")
-
-    model_config = _example({"x": 320.5, "y": 240.0})
-
-
-class BoundingBox(BaseModel):
-    x_min: float
-    y_min: float
-    x_max: float
-    y_max: float
-
-    model_config = _example({
-        "x_min": 300.0, "y_min": 220.0, "x_max": 341.0, "y_max": 270.0,
-    })
-
-
-class CupInfo(BaseModel):
-    id: str = Field(..., description="프레임 내 고유 ID")
-    label: str = Field(..., description="YOLO 클래스 레이블")
-    confidence: float = Field(..., description="신뢰도 [0.0, 1.0]")
-    position: Optional[EEPositionSchema] = Field(None, description="base_link 3D 좌표 (m); depth 실패 시 null")
-    pixel: PixelPoint = Field(..., description="bbox 중심 픽셀 좌표")
-    bbox: BoundingBox = Field(..., description="픽셀 단위 bbox")
-
-    model_config = _example({
-        "id": "cup_0",
-        "label": "cup",
-        "confidence": 0.94,
-        "position": {"x": 0.45, "y": -0.12, "z": 0.05},
-        "pixel": {"x": 320.5, "y": 240.0},
-        "bbox": {"x_min": 300.0, "y_min": 220.0, "x_max": 341.0, "y_max": 270.0},
-    })
-
-
-class CupDetectionFrame(BaseModel):
-    stamp: float = Field(..., description="UNIX 타임스탬프 (초)")
-    frame_id: str = Field(..., description="좌표 기준 프레임")
-    count: int = Field(..., description="감지된 컵 수")
-    cups: list[CupInfo] = Field(default=[], description="감지된 컵 목록")
-
-    model_config = _example({
-        "stamp": 1747291383.512,
-        "frame_id": "base_link",
-        "count": 1,
-        "cups": [{
-            "id": "cup_0",
-            "label": "cup",
-            "confidence": 0.94,
-            "position": {"x": 0.45, "y": -0.12, "z": 0.05},
-            "pixel": {"x": 320.5, "y": 240.0},
-            "bbox": {"x_min": 300.0, "y_min": 220.0, "x_max": 341.0, "y_max": 270.0},
-        }],
-    })
-
-
 # ── Fallen Cup ────────────────────────────────────────────────────────────────
 
 class FallenCupDetectionStartRequest(BaseModel):

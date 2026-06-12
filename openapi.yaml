@@ -102,9 +102,6 @@ paths:
               gripper:
                 summary: gripper 서비스 노드 시작
                 value: { task: gripper, args: {} }
-              cup_detection:
-                summary: cup_detection 시작
-                value: { task: cup_detection, args: {} }
               skill_api:
                 summary: skill_api 서버 시작
                 value: { task: skill_api, args: {} }
@@ -402,24 +399,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorDetail"
-        "503":
-          $ref: "#/components/responses/ServiceUnavailable"
-
-  /api/robot/cups:
-    get:
-      tags: [robot]
-      summary: 컵 감지 결과 조회
-      description: |
-        ROS 2 `/cup_poses` 토픽의 최신 프레임 — YOLO 가 인식한 컵 목록과
-        각 컵의 픽셀 좌표 · bbox · base_link 3D 위치(가능 시).
-        `cup_detection` task 가 실행 중이어야 데이터가 들어온다.
-      responses:
-        "200":
-          description: 마지막 감지 프레임
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CupDetectionFrame"
         "503":
           $ref: "#/components/responses/ServiceUnavailable"
 
@@ -780,7 +759,6 @@ components:
         task:
           type: string
           enum:
-            - cup_detection
             - gripper
             - skill_api
             - bringup_sim
@@ -790,7 +768,6 @@ components:
 
             | 값 | 설명 |
             |---|---|
-            | `cup_detection` | YOLO 컵 인식 노드 (`/cup_poses` publish) |
             | `gripper` | OnRobot 그리퍼 ROS 서비스 노드 |
             | `skill_api` | pick / pyramid 단위 스킬 HTTP 서버 |
           example: gripper
@@ -992,68 +969,6 @@ components:
         success: { type: boolean }
         skill: { type: string, example: pick }
         detail: { type: string }
-
-    # ── Cup Detection ──
-
-    PixelPoint:
-      type: object
-      required: [x, y]
-      properties:
-        x: { type: number, format: double, description: 픽셀 X }
-        y: { type: number, format: double, description: 픽셀 Y }
-
-    BoundingBox:
-      type: object
-      required: [x_min, y_min, x_max, y_max]
-      properties:
-        x_min: { type: number, format: double }
-        y_min: { type: number, format: double }
-        x_max: { type: number, format: double }
-        y_max: { type: number, format: double }
-
-    CupInfo:
-      type: object
-      required: [id, label, confidence, pixel, bbox]
-      properties:
-        id:
-          type: string
-          description: 프레임 내 고유 ID
-          example: cup_0
-        label:
-          type: string
-          example: cup
-        confidence:
-          type: number
-          format: double
-          minimum: 0.0
-          maximum: 1.0
-        position:
-          $ref: "#/components/schemas/EEPosition"
-          nullable: true
-          description: base_link 3D 좌표 (m). depth 실패 시 null
-        pixel:
-          $ref: "#/components/schemas/PixelPoint"
-        bbox:
-          $ref: "#/components/schemas/BoundingBox"
-
-    CupDetectionFrame:
-      type: object
-      required: [stamp, frame_id, count, cups]
-      properties:
-        stamp:
-          type: number
-          format: double
-          description: UNIX 타임스탬프 (초)
-        frame_id:
-          type: string
-          example: base_link
-        count:
-          type: integer
-          description: 감지된 컵 수
-        cups:
-          type: array
-          items:
-            $ref: "#/components/schemas/CupInfo"
 
     PixelToWorldResponse:
       type: object
