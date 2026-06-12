@@ -97,7 +97,6 @@ else
     # shellcheck disable=SC1090
     source "$ROS_SETUP"
     for ws in \
-        "$SCRIPT_DIR/../ros2-recode-sequence" \
         "$SCRIPT_DIR/../ros2-depth-point-cloude" \
         "$SCRIPT_DIR/../vision-node"; do
         if [[ "${FORCE_BUILD:-false}" == "true" ]] || vision_ws_needs_build "$ws"; then
