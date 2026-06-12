@@ -40,12 +40,12 @@ ROS2_WORKSPACE = CUP_STACK_DIR.parent.parent  # ros2-cup-stack/ros2/
 # ── cup_stack_agent LLM-loop logs ──────────────────────────────────────────────
 # The agent (cup_stack_agent) writes per-node logs to
 # <integration-repo>/cup_stack_agent/logs/<RUN_ID>/*.log. bringup_agent.py lives at
-# <integration-repo>/cup-stack-server/server/bringup_agent.py, so the logs dir is
-# two levels up from server/. Override the location with AGENT_LOGS_DIR.
+# <integration-repo>/server/bringup_agent.py (integration root, post-flatten), so the
+# logs dir is one level up from server/. Override the location with AGENT_LOGS_DIR.
 AGENT_LOGS_DIR = Path(
     os.environ.get(
         "AGENT_LOGS_DIR",
-        str(_SCRIPT_DIR.parent.parent / "cup_stack_agent" / "logs"),
+        str(_SCRIPT_DIR.parent / "cup_stack_agent" / "logs"),
     )
 )
 

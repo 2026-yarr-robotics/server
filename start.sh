@@ -13,7 +13,7 @@ set -e
 
 ROS_SETUP="/opt/ros/humble/setup.bash"
 # readlink -f 로 심볼릭 링크(루트의 ./start.sh)를 실제 server/ 경로로 resolve한다.
-# 안 하면 링크로 실행 시 SCRIPT_DIR 이 repo 루트가 돼 ../../vision 등이 어긋난다.
+# 안 하면 링크로 실행 시 SCRIPT_DIR 이 repo 루트가 돼 ../<submodule> 경로가 어긋난다.
 SCRIPT_DIR=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)
 SESSION="cup-stack"
 
@@ -97,9 +97,9 @@ else
     # shellcheck disable=SC1090
     source "$ROS_SETUP"
     for ws in \
-        "$SCRIPT_DIR/../../vision/ros2-recode-sequence" \
-        "$SCRIPT_DIR/../../vision/ros2-depth-point-cloude" \
-        "$SCRIPT_DIR/../../vision/vision-node"; do
+        "$SCRIPT_DIR/../ros2-recode-sequence" \
+        "$SCRIPT_DIR/../ros2-depth-point-cloude" \
+        "$SCRIPT_DIR/../vision-node"; do
         if [[ "${FORCE_BUILD:-false}" == "true" ]] || vision_ws_needs_build "$ws"; then
             echo "  - colcon build: $ws"
             if ! ( cd "$ws" && colcon build --symlink-install ); then
@@ -169,9 +169,9 @@ tmux new-window -t "$SESSION" -n "cam-exo"
 # 해상도는 launch 파일 default (color/depth 1280x720x30) 를 사용한다.
 CUP_STACK_SETUP="$SCRIPT_DIR/../ros2-cup-stack/install/setup.bash"
 # cameras_only.launch.py 와 cameras.yaml 은 recode_sequence 패키지 share 에
-# 있다. recode_sequence 는 integration 의 vision/ 서브모듈로 옮겨졌으므로
+# 있다. recode_sequence 는 integration 루트 서브모듈(ros2-recode-sequence)이므로
 # (구 cup-stack-server/yarr-robust-speed-stack 아님) 그쪽 install 을 source 한다.
-RECODE_SETUP="$SCRIPT_DIR/../../vision/ros2-recode-sequence/install/setup.bash"
+RECODE_SETUP="$SCRIPT_DIR/../ros2-recode-sequence/install/setup.bash"
 tmux send-keys -t "$SESSION:cam-exo" \
     "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=exo" Enter
 
@@ -179,8 +179,8 @@ tmux send-keys -t "$SESSION:cam-exo" \
 # exo 카메라 영상(/exo/exo/*)을 받아 /digital_twin/boxes, /vision/cups_on_table
 # 를 만드는 비전 파이프라인. cup_stack_agent 의 stabilizer/aggregator 가 이걸
 # 소비한다. camera_ns:=exo 로 /camera/camera/* → /exo/exo/* 리맵이 걸린다.
-# integration repo 의 vision/ros2-depth-point-cloude install 을 반드시 source.
-DEPTH_DT_SETUP="$SCRIPT_DIR/../../vision/ros2-depth-point-cloude/install/setup.bash"
+# integration repo 의 ros2-depth-point-cloude install 을 반드시 source.
+DEPTH_DT_SETUP="$SCRIPT_DIR/../ros2-depth-point-cloude/install/setup.bash"
 tmux new-window -t "$SESSION" -n "vision-exo"
 # 카메라가 /exo/exo/* 발행을 시작할 시간을 준 뒤 파이프라인을 띄운다
 # (world_origin_node 의 ArUco 타임아웃이 카메라 부팅 전에 도는 것 방지).
@@ -193,7 +193,7 @@ tmux send-keys -t "$SESSION:vision-exo" \
 # GSP 가 각 pyramid step 완료를 확인하고 다음 step 으로 진행한다(이게 없으면
 # step 1 에서 루프가 멈춤). slot 단축키(L1_L..)는 payload_builder.normalize_stack
 # 가 L1_left.. 로 변환하므로 그대로 둔다.
-VISION_NODE_SETUP="$SCRIPT_DIR/../../vision/vision-node/install/setup.bash"
+VISION_NODE_SETUP="$SCRIPT_DIR/../vision-node/install/setup.bash"
 tmux new-window -t "$SESSION" -n "verifier"
 # vision-exo 가 /digital_twin/boxes 를 내보낸 뒤 띄운다.
 tmux send-keys -t "$SESSION:verifier" \
@@ -249,7 +249,7 @@ tmux send-keys -t "$SESSION:gripper" \
 #     user_command=None → 콜드스타트(플랜 null), 자동 발사 없음.
 # (자동 발행이 필요하면 USER_COMMAND="3단 쌓아줘" WITH_AGENT=true 로 override.)
 if [[ "$WITH_AGENT" == "true" ]]; then
-    AGENT_DIR="$SCRIPT_DIR/../../cup_stack_agent"
+    AGENT_DIR="$SCRIPT_DIR/../cup_stack_agent"
     AGENT_ARGS=""
     [[ "$AGENT_REAL_API" == "true" ]] && AGENT_ARGS="--real-api"
     AGENT_USER_COMMAND="${USER_COMMAND:- }"   # 기본 공백 = 자동 발행 안 함
