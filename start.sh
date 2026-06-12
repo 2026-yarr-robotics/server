@@ -169,9 +169,9 @@ tmux new-window -t "$SESSION" -n "cam-exo"
 # 해상도는 launch 파일 default (color/depth 1280x720x30) 를 사용한다.
 CUP_STACK_SETUP="$SCRIPT_DIR/../ros2-cup-stack/install/setup.bash"
 # cameras_only.launch.py 와 cameras.yaml 은 recode_sequence 패키지 share 에
-# 있다. recode_sequence 는 integration 루트 서브모듈(ros2-recode-sequence)이므로
+# 있다. recode_sequence 패키지는 ros2-depth-point-cloude 워크스페이스에 병합되어 있으므로
 # (구 cup-stack-server/yarr-robust-speed-stack 아님) 그쪽 install 을 source 한다.
-RECODE_SETUP="$SCRIPT_DIR/../ros2-recode-sequence/install/setup.bash"
+RECODE_SETUP="$SCRIPT_DIR/../ros2-depth-point-cloude/install/setup.bash"
 tmux send-keys -t "$SESSION:cam-exo" \
     "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=exo" Enter
 
