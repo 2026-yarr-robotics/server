@@ -197,7 +197,7 @@ VISION_NODE_SETUP="$SCRIPT_DIR/../../vision/vision-node/install/setup.bash"
 tmux new-window -t "$SESSION" -n "verifier"
 # vision-exo 가 /digital_twin/boxes 를 내보낸 뒤 띄운다.
 tmux send-keys -t "$SESSION:verifier" \
-    "source $ROS_SETUP && source $VISION_NODE_SETUP && sleep 12 && ros2 launch cup_stacking_verify cup_verify.launch.py rviz:=$VISION_RVIZ tuner:=false use_test_pub:=false" Enter
+    "source $ROS_SETUP && source $VISION_NODE_SETUP && sleep 12 && ros2 launch cup_stacking_verify cup_verify.launch.py rviz:=$VISION_RVIZ tuner:=false use_test_pub:=false cp_z:=0.095" Enter
 
 # ── 창: hand-fusion (VISION_MODE=fusion_dual 일 때만) ──────
 # hand 카메라 producer + eye-in-hand 정적 TF(handeye, world<->base_link)를 띄워
