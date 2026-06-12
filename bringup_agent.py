@@ -215,11 +215,17 @@ def _read_task_output(command: str, proc: subprocess.Popen[bytes]) -> None:
                 _task_logs[command].append(line)
                 if len(_task_logs[command]) > 500:
                     del _task_logs[command][:-500]
-    with _tasks_lock:
+    # stdout EOF 는 프로세스 reap 보다 먼저 올 수 있다 — poll() 은 그 짧은
+    # 창에서 None 을 반환해 정상 종료(rc=0)가 failed 로 오판됐다(실측).
+    # wait 로 실제 종료코드를 기다린다.
+    try:
+        rc = proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
         rc = proc.poll()
+    with _tasks_lock:
         if _task_statuses.get(command) == "running":
             _task_statuses[command] = "idle" if rc == 0 else "failed"
-    logger.info("task '%s' exited (rc=%s)", command, proc.returncode)
+    logger.info("task '%s' exited (rc=%s)", command, rc)
 
 
 # ── HTTP handler ───────────────────────────────────────────────────────────────
