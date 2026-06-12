@@ -177,12 +177,19 @@ _task_statuses: dict[str, str] = {}  # idle | running | failed
 
 
 def _build_task_cmd(command: str, args: dict[str, str]) -> list[str]:
-    # colcon builds the cup_stack overlay at the ros2-cup-stack root
-    # (ros2-cup-stack/install), NOT under ros2/. The old ROS2_WORKSPACE/install
-    # (= ros2-cup-stack/ros2/install) never existed, so the overlay was never
-    # sourced and `ros2 launch cup_stack ...` died with
-    # "Package 'cup_stack' not found".
-    install_setup = ROS2_WORKSPACE.parent / "install" / "setup.bash"  # ros2-cup-stack/install
+    # colcon overlay 위치는 호스트마다 다르다:
+    #   실기(31)   — ros2-cup-stack/install   (repo 루트에서 빌드)
+    #   Isaac dev  — ros2-cup-stack/ros2/install (ros2/ 워크스페이스에서 빌드,
+    #                doosan-robot2 포함 — 추가 doosan/moveit ws 불필요)
+    # 존재하는 첫 번째 것을 source 한다. 어느 쪽도 없으면 cup_stack 패키지를
+    # 못 찾아 `ros2 launch` 가 죽는다.
+    install_setup = next(
+        (p for p in (
+            ROS2_WORKSPACE.parent / "install" / "setup.bash",  # ros2-cup-stack/install
+            ROS2_WORKSPACE / "install" / "setup.bash",         # ros2-cup-stack/ros2/install
+        ) if p.exists()),
+        None,
+    )
     doosan_setup = Path.home() / "ros2_ws" / "install" / "setup.bash"
     moveit_setup = Path.home() / "ws_moveit" / "install" / "setup.bash"
     ros_setup = "/opt/ros/humble/setup.bash"
@@ -193,7 +200,7 @@ def _build_task_cmd(command: str, args: dict[str, str]) -> list[str]:
         full += f" && source {moveit_setup}"
     if doosan_setup.exists():
         full += f" && source {doosan_setup}"
-    if install_setup.exists():
+    if install_setup is not None:
         full += f" && source {install_setup}"
     full += f" && {ros_cmd}"
     return ["bash", "-c", full]

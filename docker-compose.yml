@@ -30,6 +30,12 @@ services:
       # Use "cuda" (not "0": launch parses "0" as INTEGER -> node type error).
       # Applied on container (re)create, no image rebuild needed.
       - FALLEN_CUP_DEVICE=cuda
+      # HOST path of the fallen_cup_detect YOLO weights — the detect task
+      # launches on the HOST via the bringup agent, so the path must resolve
+      # there. Empty (default) = launch default (speed_stack_yolo_seg share
+      # weights/best.pt). The Isaac bringup exports this before
+      # `docker compose up` because that share dir ships no .pt in git.
+      - FALLEN_CUP_WEIGHTS=${FALLEN_CUP_WEIGHTS:-}
       # Where the robot service writes persisted state (matches the volume below).
       - CUP_STATE_DIR=/app/data
     volumes:
