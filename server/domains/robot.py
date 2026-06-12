@@ -457,8 +457,8 @@ class RobotDomain:
         if mode == "relative":
             req = {
                 "pos": [x * 1000.0, y * 1000.0, z * 1000.0, 0.0, 0.0, 0.0],
-                "vel": [150.0, 60.0],
-                "acc": [300.0, 120.0],
+                "vel": [250.0, 60.0],
+                "acc": [400.0, 120.0],
                 "time": 0.0,
                 "radius": 0.0,
                 "ref": 0,
@@ -471,8 +471,8 @@ class RobotDomain:
             target_x, target_y, target_z = clamped
             req = {
                 "pos": [target_x * 1000.0, target_y * 1000.0, target_z * 1000.0, 0.0, 180.0, 0.0],
-                "vel": [150.0, 60.0],
-                "acc": [300.0, 120.0],
+                "vel": [250.0, 60.0],
+                "acc": [400.0, 120.0],
                 "time": 0.0,
                 "radius": 0.0,
                 "ref": 0,
