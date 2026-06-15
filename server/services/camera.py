@@ -45,8 +45,13 @@ class CameraStream:
         # throttle_rate_ms=100 → rosbridge 측에서 미리 10 FPS 로 제한해
         # 들여 오는 frame 자체를 줄여 CPU 부담도 감소.
         throttle_rate_ms: int = 100,
-        target_width: int = 800,
-        jpeg_quality: int = 50,
+        # Downscale + lower JPEG quality so the steady-state bitrate stays under
+        # the ~5 Mbps cloudflared tunnel ceiling. Above the ceiling, frames pile
+        # up in the TCP/cloudflared send buffer (which the app-level
+        # drop-to-latest in frames() cannot evict) and the view runs visibly
+        # behind real time. 640w @ q35 roughly halves the payload vs 800w @ q50.
+        target_width: int = 640,
+        jpeg_quality: int = 35,
     ) -> None:
         self._config = config
         self._topic = topic
