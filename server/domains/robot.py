@@ -58,6 +58,18 @@ PYRAMID_SLOT_OFFSETS: dict[str, tuple[float, int]] = {
     "3m": (0.0,                       2),
 }
 
+# Full 3-2-1 teardown order, top → bottom (the only valid unstack order — a
+# lower cup can only be lifted once the ones resting on it are gone). The
+# destination column height (``nested``) is the 1-based index in this list, so
+# cup N nests on top of the previous one. Mirrors ``script/unstack.sh``'s
+# ``SLOTS=(3m 2r 2l 1r 1m 1l)``; :meth:`RobotDomain.unstack_all_skill` walks it.
+UNSTACK_SEQUENCE: tuple[str, ...] = ("3m", "2r", "2l", "1r", "1m", "1l")
+
+# Default destination nest XY for the full teardown (base_link, m). Matches the
+# ``DEST_X``/``DEST_Y`` defaults in ``script/unstack.sh``.
+DEFAULT_UNSTACK_DEST_X = 0.400
+DEFAULT_UNSTACK_DEST_Y = 0.100
+
 # ── Safety-stop ("yellow light") auto-recovery ───────────────────────────────
 # A velocity/acceleration-limit violation drops the Doosan controller into a
 # safety-stopped state (the amber/yellow status lamp). Unlike a red EMERGENCY
@@ -378,6 +390,34 @@ class RobotDomain:
         if place_safe_z_min is not None:
             args["place_safe_z_min"] = str(place_safe_z_min)
         return await self.start_task("fallen_cup_recovery", args)
+
+    async def start_outlier_cup_recovery(
+        self,
+        mode: str = "drop",
+        dry_run: bool = False,
+        sim: bool = False,
+    ) -> dict[str, Any]:
+        """outlier 컵 복구 오케스트레이터 태스크(outlier_cup_recovery launch)를 시작한다.
+
+        fallen cup 을 전부 세운 뒤 mouth-up cup 을 전부 뒤집는 상위 집합 스킬.
+        fallen-only 인 ``start_fallen_cup_recovery`` 와 같은 MoveItPy +
+        dsr_moveit_controller 를 쓰므로 skill_api 와 컨트롤러 경합이 생긴다 —
+        시작 전에 skill_api 를 best-effort 로 정지시킨다 (다음 pick/pyramid
+        호출 시 lazy 재시작됨).
+
+        ``multi_cup`` 은 오케스트레이터가 강제 ON 이라 인자로 받지 않는다.
+        """
+        try:
+            await self._launcher.stop(SKILL_API_COMMAND)
+        except Exception as exc:
+            logger.warning("skill_api stop before outlier_cup_recovery failed: %s", exc)
+
+        args = {
+            "mode": mode,
+            "dry_run": str(dry_run).lower(),
+            "sim": str(sim).lower(),
+        }
+        return await self.start_task("outlier_cup_recovery", args)
 
     async def _stop_motion(self) -> bool:
         """Best-effort: Doosan 컨트롤러에 퀵스탑 명령을 보낸다."""
@@ -1219,6 +1259,118 @@ class RobotDomain:
         }
         logger.info("unstack_skill (nested=%d) -> %s", nested, payload)
         return await self._post_pyramid_step(payload)
+
+    async def unstack_all_skill(
+        self,
+        x: float = DEFAULT_UNSTACK_DEST_X,
+        y: float = DEFAULT_UNSTACK_DEST_Y,
+        *,
+        max_retry: int = 5,
+        retry_delay: float = 3.0,
+    ) -> dict[str, Any]:
+        """Tear down the whole 3-2-1 pyramid into one nested column at (x, y).
+
+        Server-side port of ``script/unstack.sh``: walks :data:`UNSTACK_SEQUENCE`
+        (``3m → 2r → 2l → 1r → 1m → 1l``) and runs :meth:`unstack_skill` once per
+        slot, raising the destination column height ``nested`` from 1 to 6 so the
+        six cups nest on top of one another.
+
+        Each step is retried up to ``max_retry`` times on a transient failure —
+        a robot-motion service timeout (``409``, surfaced as ``RuntimeError``) or
+        a skill_api / tunnel blip (``ConnectionError``) — sleeping ``retry_delay``
+        seconds between attempts, exactly as ``unstack.sh``'s ``post_json`` does.
+        A bad-input ``ValueError`` (slot/XYZ out of range) is **not** retried and
+        propagates immediately so the caller fails fast before any cup moves.
+
+        Unlike the single-cup skills this does not raise on a motion failure: if a
+        step still fails after all retries the sequence stops and a structured
+        result with ``success=False`` and the completed-step count is returned, so
+        the UI can report "completed N/6" instead of an opaque 5xx.
+
+        Args:
+            x, y: destination nest XY (base_link, m). Defaults mirror unstack.sh.
+            max_retry: attempts per step before giving up (>= 1).
+            retry_delay: seconds slept between a failed attempt and the next.
+
+        Returns:
+            ``{success, skill, dest, total, completed, detail, steps}`` where
+            ``steps`` is one entry per attempted slot
+            (``{slot, nested, success, attempts, detail}``).
+
+        Raises:
+            ValueError: invalid destination XY/Z (no cup is moved).
+        """
+        steps: list[dict[str, Any]] = []
+        total = len(UNSTACK_SEQUENCE)
+        logger.info(
+            "unstack_all_skill start: %d cups -> nest (x=%.3f, y=%.3f)",
+            total, x, y,
+        )
+
+        for index, slot in enumerate(UNSTACK_SEQUENCE, start=1):
+            nested = index  # destination column height: 1st cup=1 … 6th cup=6
+            last_err: Exception | None = None
+            step_detail = ""
+            attempts = 0
+
+            for attempt in range(1, max_retry + 1):
+                attempts = attempt
+                try:
+                    result = await self.unstack_skill(slot, x, y, nested)
+                    step_detail = str(result.get("detail", ""))
+                    last_err = None
+                    break
+                except ValueError:
+                    # Bad input — never retryable; fail fast before touching a cup.
+                    raise
+                except (RuntimeError, ConnectionError) as exc:
+                    last_err = exc
+                    logger.warning(
+                        "unstack_all step %d/%d slot=%s attempt %d/%d failed: %s",
+                        index, total, slot, attempt, max_retry, exc,
+                    )
+                    if attempt < max_retry:
+                        await asyncio.sleep(retry_delay)
+
+            ok = last_err is None
+            steps.append({
+                "slot": slot,
+                "nested": nested,
+                "success": ok,
+                "attempts": attempts,
+                "detail": step_detail if ok else str(last_err),
+            })
+
+            if not ok:
+                detail = (
+                    f"slot={slot} (step {index}/{total}) 실패 — "
+                    f"{last_err}; {index - 1}/{total} 컵 해체 후 중단"
+                )
+                logger.error("unstack_all_skill aborted: %s", detail)
+                return {
+                    "success": False,
+                    "skill": "unstack_all",
+                    "dest": {"x": float(x), "y": float(y)},
+                    "total": total,
+                    "completed": index - 1,
+                    "detail": detail,
+                    "steps": steps,
+                }
+
+        detail = (
+            f"피라미드 해체 완료 ({total}/{total}) -> "
+            f"nest (x={x:.3f}, y={y:.3f})"
+        )
+        logger.info("unstack_all_skill done: %s", detail)
+        return {
+            "success": True,
+            "skill": "unstack_all",
+            "dest": {"x": float(x), "y": float(y)},
+            "total": total,
+            "completed": total,
+            "detail": detail,
+            "steps": steps,
+        }
 
     async def _post_pyramid_step(self, payload: dict[str, Any]) -> dict[str, Any]:
         """POST a fully-resolved pick/place to skill_api_node /skill/pyramid_step.

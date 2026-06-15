@@ -17,6 +17,7 @@ from ..schemas import (
     GripperResponse,
     MoveRequest,
     MoveResponse,
+    OutlierCupRecoveryRequest,
     PickSkillRequest,
     PickSkillResponse,
     PixelToWorldResponse,
@@ -33,6 +34,8 @@ from ..schemas import (
     TaskStartRequest,
     TaskStopRequest,
     TaskStoppedResponse,
+    UnstackAllSkillRequest,
+    UnstackAllSkillResponse,
     UnstackSkillRequest,
     UnstackSkillResponse,
     UserCommandRequest,
@@ -313,6 +316,29 @@ async def skill_unstack(body: UnstackSkillRequest) -> dict:
         raise HTTPException(status_code=status, detail=msg)
 
 
+@router.post("/skill/unstack_all", response_model=UnstackAllSkillResponse)
+async def skill_unstack_all(body: UnstackAllSkillRequest) -> dict:
+    """피라미드 6 컵을 위에서부터 모두 해체해 목적지 (x,y) 한 스택으로 모은다.
+
+    ``script/unstack.sh`` 의 서버측 스킬화 — ``/skill/unstack`` 단위 스킬을
+    ``3m → 2r → 2l → 1r → 1m → 1l`` 순서로 6 회 호출하며 매 컵 ``nested`` 를
+    1→6 으로 올린다. 단계별로 일시적 실패(409/터널 blip)는 재시도하고,
+    모든 재시도 후에도 실패하면 ``success=False`` + ``completed`` 로 부분
+    진행을 보고한다 (5xx 를 던지지 않음). 잘못된 목적지 좌표만 422.
+
+    참고: 6 컵 pick-place 라 응답까지 ~수 분 걸릴 수 있다 (단일 장기 요청).
+    """
+    domain = _get_domain()
+    try:
+        return await domain.unstack_all_skill(
+            body.x, body.y,
+            max_retry=body.max_retry,
+            retry_delay=body.retry_delay,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
 @router.post("/skill/scan", response_model=ScanSkillResponse)
 async def skill_scan() -> dict:
     """양쪽 두 방향(pos1, pos2) 스캔 후 초기 위치로 복귀.
@@ -406,6 +432,32 @@ async def start_fallen_cup_recovery(body: FallenCupRecoveryRequest) -> dict:
             sim=body.sim,
             stand_cup_margin_m=body.stand_cup_margin_m,
             place_safe_z_min=body.place_safe_z_min,
+        )
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+# ── Outlier Cup ───────────────────────────────────────────────────────────────
+
+@router.post("/outlier-cup/recovery", response_model=TaskStartedResponse)
+async def start_outlier_cup_recovery(body: OutlierCupRecoveryRequest) -> dict:
+    """outlier 컵 복구 오케스트레이터 태스크(outlier_cup_recovery)를 시작한다.
+
+    1회 실행 상위 집합 태스크: fallen cup 을 base_link 최근접 순으로 전부 세운 뒤,
+    mouth-up cup 을 전부 뒤집어 내려놓고 HOME 복귀 후 종료. fallen-only 인
+    ``fallen_cup_recovery`` 엔드포인트는 그대로 유지된다. MoveItPy 컨트롤러 경합
+    방지를 위해 skill_api 서비스가 떠 있으면 먼저 중지한다 (다음 pick/pyramid
+    호출 시 자동 재시작).
+
+    진행 상황: ``/ws/task/log`` · ``/ws/robot/state``
+    중지: ``POST /api/robot/task/stop`` ``{"name": "outlier_cup_recovery"}``
+    """
+    domain = _get_domain()
+    try:
+        return await domain.start_outlier_cup_recovery(
+            mode=body.mode,
+            dry_run=body.dry_run,
+            sim=body.sim,
         )
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))

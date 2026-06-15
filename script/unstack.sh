@@ -13,6 +13,11 @@
 # 매 컵마다 목적지 컬럼 높이 nested 를 1..6 으로 증가시켜 위로 nesting 한다.
 #   place_z = pick_z + (nested-1) * nest_inc
 #
+# 참고: 이 시퀀스는 서버 스킬로도 제공된다 (이 스크립트의 스킬화):
+#   POST /api/robot/skill/unstack_all  {"x": DEST_X, "y": DEST_Y}
+# 프론트엔드 대시보드에서는 명령 `/unstack --all [x y]` 또는 동명의 버튼으로 실행.
+# 이 스크립트는 동일 로직의 CLI 레퍼런스로 유지한다.
+#
 # 사용법:
 #   ./unstack.sh                       # 기본 목적지 (DEST_X, DEST_Y)
 #   ./unstack.sh 0.40 0.10             # 목적지 x y 를 인자로 지정

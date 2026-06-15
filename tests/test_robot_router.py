@@ -169,6 +169,81 @@ class TestUnstackSkillEndpoint:
         assert resp.status_code == 422
 
 
+class TestUnstackAllSkillEndpoint:
+    """POST /api/robot/skill/unstack_all — script/unstack.sh 의 전체 해체 스킬."""
+
+    def test_unstack_all_runs_full_top_down_sequence(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        # 단위 unstack 의 skill_api 호출만 mock — 슬롯 순서/nested 진행은 실제 로직.
+        robot_domain._ensure_skill_api = AsyncMock()
+        robot_domain._post_pyramid_step = AsyncMock(
+            return_value={"success": True, "skill": "pyramid", "detail": "ok"}
+        )
+
+        resp = client.post("/api/robot/skill/unstack_all", json={"x": 0.40, "y": 0.10})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["completed"] == 6
+        assert data["total"] == 6
+        assert data["dest"] == {"x": 0.40, "y": 0.10}
+
+        # 위 → 아래 해체 순서 + nested 1..6 진행.
+        assert [s["slot"] for s in data["steps"]] == ["3m", "2r", "2l", "1r", "1m", "1l"]
+        assert [s["nested"] for s in data["steps"]] == [1, 2, 3, 4, 5, 6]
+        assert all(s["success"] for s in data["steps"])
+        assert robot_domain._post_pyramid_step.await_count == 6
+
+        # 각 단계의 pick 은 해당 슬롯, place 는 목적지 + 증가하는 place_z.
+        slots = [c.args[0]["slot"] for c in robot_domain._post_pyramid_step.await_args_list]
+        assert slots == ["3m", "2r", "2l", "1r", "1m", "1l"]
+        place_zs = [c.args[0]["place_z"] for c in robot_domain._post_pyramid_step.await_args_list]
+        assert place_zs == pytest.approx([0.313 + i * 0.0127 for i in range(6)])
+
+    def test_unstack_all_defaults_to_unstack_sh_destination(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        robot_domain._ensure_skill_api = AsyncMock()
+        robot_domain._post_pyramid_step = AsyncMock(
+            return_value={"success": True, "skill": "pyramid", "detail": ""}
+        )
+        # 본문 비움 → DEST 기본 (0.40, 0.10) (unstack.sh DEST_X/DEST_Y 와 동일).
+        resp = client.post("/api/robot/skill/unstack_all", json={})
+        assert resp.status_code == 200
+        assert resp.json()["dest"] == {"x": 0.40, "y": 0.10}
+
+    def test_unstack_all_stops_and_reports_on_step_failure(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        robot_domain._ensure_skill_api = AsyncMock()
+        # 첫 단계가 계속 실패 → max_retry 만큼 재시도 후 시퀀스 중단.
+        robot_domain._post_pyramid_step = AsyncMock(
+            side_effect=RuntimeError("502: boom")
+        )
+        resp = client.post(
+            "/api/robot/skill/unstack_all",
+            json={"x": 0.40, "y": 0.10, "max_retry": 2, "retry_delay": 0},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is False
+        assert data["completed"] == 0
+        assert len(data["steps"]) == 1          # 첫 단계에서 멈춤
+        assert data["steps"][0]["slot"] == "3m"
+        assert data["steps"][0]["success"] is False
+        assert data["steps"][0]["attempts"] == 2
+        assert robot_domain._post_pyramid_step.await_count == 2  # max_retry 회 시도
+
+    def test_unstack_all_invalid_dest_returns_422(self, client: TestClient):
+        # 목적지 X 가 워크스페이스 밖 → 첫 컵을 옮기기 전에 422 로 빠른 실패.
+        resp = client.post(
+            "/api/robot/skill/unstack_all",
+            json={"x": 0.99, "y": 0.10},
+        )
+        assert resp.status_code == 422
+
+
 class TestTaskLogEndpoint:
     def test_missing_name(self, client: TestClient):
         resp = client.get("/api/robot/task/log")
@@ -279,6 +354,44 @@ class TestFallenCupEndpoints:
         c = TestClient(app)
         resp = c.get("/api/robot/fallen-cup/state")
         assert resp.status_code == 503
+
+
+class TestOutlierCupEndpoints:
+    def test_recovery_stops_skill_api_and_starts_task(
+        self, client: TestClient, mock_launcher,
+    ):
+        mock_launcher.start.return_value = _make_running_task("outlier_cup_recovery")
+        resp = client.post(
+            "/api/robot/outlier-cup/recovery",
+            json={"mode": "place", "dry_run": False, "sim": True},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "outlier_cup_recovery"
+
+        # MoveItPy 컨트롤러 경합 방지: skill_api 먼저 정지
+        mock_launcher.stop.assert_awaited_with("skill_api")
+
+        called_command, called_args = mock_launcher.start.call_args[0]
+        assert called_command == "outlier_cup_recovery"
+        # multi_cup 은 오케스트레이터가 강제 ON → 인자로 보내지 않음
+        assert called_args == {"mode": "place", "dry_run": "false", "sim": "true"}
+        assert "multi_cup" not in called_args
+
+    def test_recovery_defaults(self, client: TestClient, mock_launcher):
+        mock_launcher.start.return_value = _make_running_task("outlier_cup_recovery")
+        resp = client.post("/api/robot/outlier-cup/recovery", json={})
+        assert resp.status_code == 200
+        _, called_args = mock_launcher.start.call_args[0]
+        assert called_args == {"mode": "drop", "dry_run": "false", "sim": "false"}
+
+    def test_recovery_invalid_mode_returns_422(self, client: TestClient):
+        resp = client.post("/api/robot/outlier-cup/recovery", json={"mode": "throw"})
+        assert resp.status_code == 422
+
+    def test_recovery_conflict_returns_409(self, client: TestClient, mock_launcher):
+        mock_launcher.start.side_effect = RuntimeError("Task 'x' is already running")
+        resp = client.post("/api/robot/outlier-cup/recovery", json={"mode": "drop"})
+        assert resp.status_code == 409
 
 
 def _routed_call_service(*, states, moves, control_ok=True, mode_ok=True):

@@ -292,6 +292,31 @@ class FallenCupRecoveryRequest(BaseModel):
     model_config = _example({"mode": "place", "multi_cup": False, "dry_run": False, "sim": False})
 
 
+# ── Outlier Cup ───────────────────────────────────────────────────────────────
+
+class OutlierCupRecoveryRequest(BaseModel):
+    """Body for POST /api/robot/outlier-cup/recovery.
+
+    outlier_cup_recovery 오케스트레이터 태스크(1회 실행)를 시작한다 — 한 프레임의
+    fallen cup 을 base_link 최근접 순으로 전부 세운 뒤, mouth-up cup 을 전부 뒤집어
+    내려놓고 HOME 복귀 후 종료한다. fallen-only 인 ``fallen_cup_recovery`` 는
+    그대로 유지되며, 이 엔드포인트는 그 상위 집합(orchestrator)이다.
+
+    진행 상황은 ``/ws/task/log`` · ``/ws/robot/state`` 로 모니터링하고, 중지는
+    ``POST /api/robot/task/stop`` ``{"name": "outlier_cup_recovery"}`` 사용.
+    ``multi_cup`` 은 오케스트레이터가 강제 ON 이라 노출하지 않는다.
+    """
+
+    mode: Literal["drop", "place"] = Field(
+        "drop", description="fallen lift 후 동작: drop(그 자리에 놓기) / place(옮겨 세우기). "
+                            "mouth-up 단계와는 무관",
+    )
+    dry_run: bool = Field(False, description="approach까지만 (gripper/insert/lift 스킵, 양 스킬 공통)")
+    sim: bool = Field(False, description="카메라/그리퍼 HW 우회 (MoveIt virtual)")
+
+    model_config = _example({"mode": "drop", "dry_run": False, "sim": False})
+
+
 class FallenCupPixel(BaseModel):
     x: float
     y: float
@@ -596,6 +621,71 @@ class UnstackSkillResponse(BaseModel):
         "success": True,
         "skill": "unstack",
         "detail": "slot=3m pick=(0.50,0.000,0.513) place=(0.40,0.10,0.313)",
+    })
+
+
+# ── Unstack-All (full teardown) Skill ─────────────────────────────────────────
+
+class UnstackAllSkillRequest(BaseModel):
+    """POST /api/robot/skill/unstack_all 본문. 목적지 nest XY 만 받음.
+
+    ``script/unstack.sh`` 의 서버측 스킬화: 피라미드 6 컵을 위에서부터
+    (3m → 2r → 2l → 1r → 1m → 1l) 순서로 모두 집어 목적지 (x, y) 한 곳에
+    nested 컬럼으로 쌓는다. slot 별 pick 좌표·pick_z 는 서버
+    /api/robot/config/pyramid 캐시에서 자동으로 가져오므로 본문에 없다.
+
+    각 단계는 일시적 실패(로봇 모션 409 / 터널 blip)에 대해 ``max_retry``
+    회까지 ``retry_delay`` 초 간격으로 재시도한다 (unstack.sh 와 동일).
+    """
+
+    x: float = Field(0.400, description="목적지 nest 중앙 X (base_link, m)")
+    y: float = Field(0.100, description="목적지 nest 중앙 Y (base_link, m)")
+    max_retry: int = Field(
+        5, ge=1, le=20, description="단계별 재시도 횟수 (일시적 실패 대응)"
+    )
+    retry_delay: float = Field(
+        3.0, ge=0.0, le=30.0, description="재시도 간 대기(초)"
+    )
+
+    model_config = _example({"x": 0.40, "y": 0.10})
+
+
+class UnstackAllStep(BaseModel):
+    """전체 해체 시퀀스의 단계별 결과 (슬롯 1 개당 1 entry)."""
+
+    slot: PyramidSlotKey
+    nested: int = Field(..., description="이 컵을 놓은 뒤 목적지 컬럼 높이 (1=맨 아래)")
+    success: bool
+    attempts: int = Field(..., description="이 단계에 소요된 시도 횟수")
+    detail: str = ""
+
+
+class UnstackAllSkillResponse(BaseModel):
+    """전체 피라미드 해체 결과.
+
+    ``success`` 는 6 컵 전부 해체 성공 여부. 도중에 한 단계가 모든 재시도
+    후에도 실패하면 시퀀스를 멈추고 ``success=False`` + ``completed`` (성공한
+    컵 수) 로 반환한다 (부분 진행 보고용 — 5xx 를 던지지 않는다).
+    """
+
+    success: bool
+    skill: str = "unstack_all"
+    dest: PyramidConfigCenter
+    total: int = Field(6, description="해체 대상 컵 총 수")
+    completed: int = Field(..., description="성공적으로 해체·적재한 컵 수 (0~6)")
+    detail: str = ""
+    steps: list[UnstackAllStep] = Field(default_factory=list)
+
+    model_config = _example({
+        "success": True,
+        "skill": "unstack_all",
+        "dest": {"x": 0.40, "y": 0.10},
+        "total": 6,
+        "completed": 6,
+        "detail": "피라미드 해체 완료 (6/6) -> nest (x=0.400, y=0.100)",
+        "steps": [
+            {"slot": "3m", "nested": 1, "success": True, "attempts": 1, "detail": ""},
+        ],
     })
 
 
