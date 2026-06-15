@@ -83,53 +83,6 @@ DEFAULT_UNSTACK_DEST_Y = 0.100
 # to 90.0 to additionally null the first/last genuine HOME<->grip swing.
 UNSTACK_GRIP_TWIST_DEG = 0.0
 
-# ── Safety-stop ("yellow light") auto-recovery ───────────────────────────────
-# A velocity/acceleration-limit violation drops the Doosan controller into a
-# safety-stopped state (the amber/yellow status lamp). Unlike a red EMERGENCY
-# stop (physical button), this is software-recoverable: set_robot_control
-# returns the SW-recoverable safety states to STANDBY *without* restarting
-# bringup, so the arm keeps its pose and the (separate Modbus) OnRobot gripper
-# keeps its grip — the interrupted motion can resume in place.
-#
-# robot_state enum (dsr_msgs2/srv/GetRobotState).
-ROBOT_STATE_INITIALIZING = 0
-ROBOT_STATE_STANDBY = 1
-ROBOT_STATE_MOVING = 2
-ROBOT_STATE_SAFE_OFF = 3
-ROBOT_STATE_TEACHING = 4
-ROBOT_STATE_SAFE_STOP = 5        # accel/vel-limit "yellow light"
-ROBOT_STATE_EMERGENCY_STOP = 6   # red E-stop — human must release the button
-ROBOT_STATE_HOMMING = 7
-ROBOT_STATE_RECOVERY = 8
-ROBOT_STATE_SAFE_STOP2 = 9       # collision-class — needs RECOVERY flow/reboot
-ROBOT_STATE_SAFE_OFF2 = 10
-ROBOT_STATE_NOT_READY = 15
-_ROBOT_STATE_NAMES = {
-    0: "INITIALIZING", 1: "STANDBY", 2: "MOVING", 3: "SAFE_OFF",
-    4: "TEACHING", 5: "SAFE_STOP", 6: "EMERGENCY_STOP", 7: "HOMMING",
-    8: "RECOVERY", 9: "SAFE_STOP2", 10: "SAFE_OFF2", 15: "NOT_READY",
-}
-# States that mean "not stopped" — nothing to recover.
-_ROBOT_STATE_RUNNING = frozenset({
-    ROBOT_STATE_INITIALIZING, ROBOT_STATE_STANDBY,
-    ROBOT_STATE_MOVING, ROBOT_STATE_HOMMING,
-})
-# set_robot_control command per SW-recoverable safety state
-# (dsr_msgs2/srv/SetRobotControl): 2=RESET_SAFET_STOP, 3=RESET_SAFET_OFF.
-_RECOVER_CONTROL = {
-    ROBOT_STATE_SAFE_STOP: 2,
-    ROBOT_STATE_SAFE_OFF: 3,
-}
-ROBOT_MODE_AUTONOMOUS = 1        # dsr_msgs2/srv/SetRobotMode
-RECOVER_POLL_S = 0.2
-RECOVER_TIMEOUT_S = 8.0
-# move_to: clear one safety stop and retry at reduced speed so the same
-# acceleration limit is not immediately re-tripped.
-MOVE_RECOVER_RETRIES = 1
-MOVE_RECOVER_VEL_SCALE = 0.5
-MOVE_VEL = [250.0, 60.0]   # linear mm/s, angular deg/s
-MOVE_ACC = [400.0, 120.0]  # linear mm/s^2, angular deg/s^2
-
 
 @dataclass
 class MoveLimits:
@@ -563,140 +516,10 @@ class RobotDomain:
             logger.warning("move_stop service call failed: %s", exc)
             return False
 
-    async def _get_robot_state(self) -> int | None:
-        """Current Doosan robot_state enum, or None if unavailable."""
-        if not self._bridge.connected:
-            return None
-        try:
-            res = await self._bridge.call_service(
-                "/dsr01/system/get_robot_state",
-                "dsr_msgs2/srv/GetRobotState",
-                {},
-                timeout=3.0,
-            )
-        except Exception as exc:
-            logger.warning("get_robot_state service call failed: %s", exc)
-            return None
-        if not res:
-            return None
-        try:
-            return int(res.get("robot_state"))
-        except (TypeError, ValueError):
-            return None
-
-    async def recover_safe_stop(self) -> dict[str, Any]:
-        """Clear a Doosan safety stop (the accel/vel-limit "yellow light")
-        in place, without restarting bringup.
-
-        Diagnoses ``robot_state`` and, for the SW-recoverable safety states
-        (SAFE_STOP / SAFE_OFF), issues ``set_robot_control`` to return to
-        STANDBY, then ``set_robot_mode`` AUTONOMOUS, polling until STANDBY.
-        The arm holds its pose and the OnRobot gripper (separate Modbus link)
-        holds its grip across the reset, so the caller can resume the
-        interrupted motion in place.
-
-        Not auto-cleared (caller must escalate to a bringup restart / human):
-        EMERGENCY_STOP (red, physical button) and the collision-class
-        SAFE_STOP2 / SAFE_OFF2 / RECOVERY states.
-
-        Returns ``{recovered, from_state, from_state_name, to_state,
-        to_state_name, detail}``. ``recovered`` is True when the robot is at
-        (or was never out of) STANDBY.
-        """
-        state = await self._get_robot_state()
-        info: dict[str, Any] = {
-            "recovered": False,
-            "from_state": state,
-            "from_state_name": _ROBOT_STATE_NAMES.get(state, str(state)),
-            "to_state": state,
-            "to_state_name": _ROBOT_STATE_NAMES.get(state, str(state)),
-            "detail": "",
-        }
-        if state is None:
-            info["detail"] = "robot state unavailable (rosbridge / get_robot_state)"
-            return info
-        if state in _ROBOT_STATE_RUNNING:
-            info["recovered"] = True
-            info["detail"] = "no safety stop active"
-            return info
-        if state == ROBOT_STATE_EMERGENCY_STOP:
-            info["detail"] = (
-                "EMERGENCY_STOP (red): release the physical E-stop button manually"
-            )
-            return info
-        control = _RECOVER_CONTROL.get(state)
-        if control is None:
-            info["detail"] = (
-                f"state {info['from_state_name']} is not SW-auto-recoverable; "
-                "restart bringup or run the RECOVERY flow"
-            )
-            return info
-
-        # Reset the safety stop, then ensure autonomous mode.
-        try:
-            await self._bridge.call_service(
-                "/dsr01/system/set_robot_control",
-                "dsr_msgs2/srv/SetRobotControl",
-                {"robot_control": control},
-                timeout=5.0,
-            )
-            await self._bridge.call_service(
-                "/dsr01/system/set_robot_mode",
-                "dsr_msgs2/srv/SetRobotMode",
-                {"robot_mode": ROBOT_MODE_AUTONOMOUS},
-                timeout=5.0,
-            )
-        except Exception as exc:
-            info["detail"] = f"recovery service call failed: {exc}"
-            return info
-
-        # Poll until the controller settles back to STANDBY.
-        deadline = time.monotonic() + RECOVER_TIMEOUT_S
-        while time.monotonic() < deadline:
-            await asyncio.sleep(RECOVER_POLL_S)
-            cur = await self._get_robot_state()
-            if cur is not None:
-                info["to_state"] = cur
-                info["to_state_name"] = _ROBOT_STATE_NAMES.get(cur, str(cur))
-            if cur == ROBOT_STATE_STANDBY:
-                info["recovered"] = True
-                info["detail"] = (
-                    f"reset from {info['from_state_name']} to STANDBY"
-                )
-                return info
-        info["detail"] = (
-            f"reset issued but did not reach STANDBY within "
-            f"{RECOVER_TIMEOUT_S:.0f}s (last={info['to_state_name']})"
-        )
-        return info
-
     async def _run_skill_call(self, call: Any) -> dict[str, Any]:
-        """Run a blocking skill_api POST in the executor, with safety-stop recovery.
-
-        On a skill error (``RuntimeError`` — an HTTP error from skill_api_node,
-        which is how a mid-skill safety stop surfaces), best-effort clear a
-        safety stop (the accel/vel-limit "yellow light") so the arm returns to
-        STANDBY and the next action is not blocked, then re-raise. The skill is
-        **not** re-run: mid-skill state is unknown (the cup may be half-picked),
-        so the caller / LLM loop observes the failure and replans.
-        ``ConnectionError`` (skill_api unreachable) propagates untouched — it is
-        not a safety stop and rosbridge is likely down too.
-        """
+        """Run a blocking skill_api POST in the executor."""
         loop = asyncio.get_running_loop()
-        try:
-            return await loop.run_in_executor(None, call)
-        except RuntimeError as exc:
-            rec = await self.recover_safe_stop()
-            if rec["recovered"] and rec["from_state"] in _RECOVER_CONTROL:
-                logger.warning(
-                    "skill tripped %s; cleared to STANDBY (skill not re-run)",
-                    rec["from_state_name"],
-                )
-                raise RuntimeError(
-                    f"{exc} [safety stop cleared: "
-                    f"{rec['from_state_name']}->STANDBY]"
-                ) from exc
-            raise
+        return await loop.run_in_executor(None, call)
 
     def get_ee_position(self) -> dict[str, float] | None:
         ts = self._ee_pos_ros_ts
@@ -791,37 +614,6 @@ class RobotDomain:
             self._clamp_coord(z, self._move_limits.z_min, self._move_limits.z_max),
         )
 
-    def _build_move_req(
-        self,
-        x: float,
-        y: float,
-        z: float,
-        mode: str,
-        vel_scale: float,
-    ) -> tuple[dict[str, Any], tuple[float, float, float] | None]:
-        """Build a MoveLine request.
-
-        ``vel_scale`` < 1 throttles both velocity and acceleration so a
-        post-recovery retry does not re-trip the acceleration limit that
-        caused the safety stop. Returns ``(request, clamped_xyz)`` where the
-        clamped tuple is None for relative moves.
-        """
-        vel = [v * vel_scale for v in MOVE_VEL]
-        acc = [a * vel_scale for a in MOVE_ACC]
-        if mode == "relative":
-            return {
-                "pos": [x * 1000.0, y * 1000.0, z * 1000.0, 0.0, 0.0, 0.0],
-                "vel": vel, "acc": acc, "time": 0.0, "radius": 0.0,
-                "ref": 0, "mode": 1, "blend_type": 0, "sync_type": 0,
-            }, None
-        clamped = self._validate_target(x, y, z)
-        tx, ty, tz = clamped
-        return {
-            "pos": [tx * 1000.0, ty * 1000.0, tz * 1000.0, 0.0, 180.0, 0.0],
-            "vel": vel, "acc": acc, "time": 0.0, "radius": 0.0,
-            "ref": 0, "mode": 0, "blend_type": 0, "sync_type": 0,
-        }, clamped
-
     async def move_to(
         self,
         x: float,
@@ -829,60 +621,57 @@ class RobotDomain:
         z: float,
         mode: str = "absolute",
     ) -> dict[str, Any]:
-        """Move robot end-effector via Doosan /motion/move_line.
+        """Move robot end-effector via Doosan /motion/move_line."""
+        if mode == "relative":
+            req = {
+                "pos": [x * 1000.0, y * 1000.0, z * 1000.0, 0.0, 0.0, 0.0],
+                "vel": [250.0, 60.0],
+                "acc": [400.0, 120.0],
+                "time": 0.0,
+                "radius": 0.0,
+                "ref": 0,
+                "mode": 1,
+                "blend_type": 0,
+                "sync_type": 0,
+            }
+        else:
+            clamped = self._validate_target(x, y, z)
+            target_x, target_y, target_z = clamped
+            req = {
+                "pos": [target_x * 1000.0, target_y * 1000.0, target_z * 1000.0, 0.0, 180.0, 0.0],
+                "vel": [250.0, 60.0],
+                "acc": [400.0, 120.0],
+                "time": 0.0,
+                "radius": 0.0,
+                "ref": 0,
+                "mode": 0,
+                "blend_type": 0,
+                "sync_type": 0,
+            }
 
-        If the move trips a safety stop (the accel/vel-limit "yellow light"),
-        auto-recover via :meth:`recover_safe_stop` and retry once at reduced
-        speed — the arm keeps its pose and the gripper its grip across the
-        reset, so the retry resumes the same motion. Other failures (out of
-        bounds, planning) are raised unchanged.
-        """
-        vel_scale = 1.0
-        recovered = False
-        for attempt in range(MOVE_RECOVER_RETRIES + 1):
-            req, clamped = self._build_move_req(x, y, z, mode, vel_scale)
-            try:
-                result = await self._bridge.call_service(
-                    "/dsr01/motion/move_line",
-                    "dsr_msgs2/srv/MoveLine",
-                    req,
-                    timeout=30.0,
-                )
-                ok = bool(result.get("success", False)) if result else False
-                msg = (
-                    result.get("message", "Move command failed")
-                    if result else "move_line service unavailable"
-                )
-            except RuntimeError as exc:
-                ok, msg = False, str(exc)
+        try:
+            result = await self._bridge.call_service(
+                "/dsr01/motion/move_line",
+                "dsr_msgs2/srv/MoveLine",
+                req,
+                timeout=30.0,
+            )
+        except RuntimeError as exc:
+            raise RuntimeError(f"Move failed: {exc}") from exc
 
-            if ok:
-                if mode != "relative" and clamped is not None:
-                    tx, ty, tz = clamped
-                    self._commanded_pos = {"x": tx, "y": ty, "z": tz}
-                return {
-                    "success": True,
-                    "message": "Moved (recovered from safety stop)"
-                    if recovered else "Moved",
-                    "position": self._commanded_pos,
-                    "recovered": recovered,
-                }
+        ok = bool(result.get("success", False)) if result else False
+        if not ok:
+            msg = result.get("message", "Move command failed") if result else "move_line service unavailable"
+            raise RuntimeError(msg)
 
-            # Move failed. If it was a SW-recoverable safety stop, clear it
-            # and retry once at reduced speed; otherwise surface the failure.
-            if attempt < MOVE_RECOVER_RETRIES:
-                rec = await self.recover_safe_stop()
-                if rec["recovered"] and rec["from_state"] in _RECOVER_CONTROL:
-                    logger.warning(
-                        "move tripped %s; recovered to STANDBY, retrying at "
-                        "%.0f%% speed", rec["from_state_name"],
-                        MOVE_RECOVER_VEL_SCALE * 100,
-                    )
-                    vel_scale = MOVE_RECOVER_VEL_SCALE
-                    recovered = True
-                    continue
-            raise RuntimeError(f"Move failed: {msg}")
-        raise RuntimeError("Move failed")
+        if mode != "relative":
+            self._commanded_pos = {"x": target_x, "y": target_y, "z": target_z}
+
+        return {
+            "success": True,
+            "message": "Moved",
+            "position": self._commanded_pos,
+        }
 
     def _get_ee_matrix(self) -> np.ndarray | None:
         target, base = "link_6", "base_link"
