@@ -197,11 +197,32 @@ class MoveResponse(BaseModel):
     success: bool
     message: str
     position: Optional[EEPositionSchema] = None
+    recovered: bool = False  # True if a safety stop was auto-cleared mid-move
 
     model_config = _example({
         "success": True,
         "message": "move completed",
         "position": {"x": 0.45, "y": -0.12, "z": 0.30},
+        "recovered": False,
+    })
+
+
+class RecoverResponse(BaseModel):
+    """Result of clearing a Doosan safety stop (accel/vel-limit 'yellow light')."""
+    recovered: bool
+    from_state: Optional[int] = None
+    from_state_name: str
+    to_state: Optional[int] = None
+    to_state_name: str
+    detail: str
+
+    model_config = _example({
+        "recovered": True,
+        "from_state": 5,
+        "from_state_name": "SAFE_STOP",
+        "to_state": 1,
+        "to_state_name": "STANDBY",
+        "detail": "reset from SAFE_STOP to STANDBY",
     })
 
 
