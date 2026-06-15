@@ -16,8 +16,12 @@ def test_fallen_cup_recovery_in_task_commands():
     assert "fallen_cup_recovery" in TASK_COMMANDS
 
 
+def test_outlier_cup_recovery_in_task_commands():
+    assert "outlier_cup_recovery" in TASK_COMMANDS
+
+
 def test_task_commands():
-    assert TASK_COMMANDS == {"fallen_cup_recovery"}
+    assert TASK_COMMANDS == {"fallen_cup_recovery", "outlier_cup_recovery"}
 
 
 def test_all_commands_union():

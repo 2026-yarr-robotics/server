@@ -41,7 +41,12 @@ _LOG_NOISE = frozenset([
 #   under the /dsr01 namespace). Uses MoveItPy + dsr_moveit_controller, so it
 #   contends with the long-lived skill_api service for the robot controllers —
 #   RobotDomain.start_fallen_cup_recovery stops skill_api before starting it.
-TASK_COMMANDS: set[str] = {"fallen_cup_recovery"}
+# outlier_cup_recovery: one-shot superset orchestrator — stands all fallen cups
+#   first, then flips all mouth-up cups, then HOME+exit
+#   (cup_stack/outlier_cup_recovery.launch.py wraps dsr_practice/outlier_cup_recovery).
+#   Same MoveItPy/dsr_moveit_controller contention as fallen_cup_recovery, so
+#   RobotDomain.start_outlier_cup_recovery also stops skill_api first.
+TASK_COMMANDS: set[str] = {"fallen_cup_recovery", "outlier_cup_recovery"}
 ALL_COMMANDS = BRINGUP_COMMANDS | TASK_COMMANDS | SERVICE_COMMANDS
 
 
