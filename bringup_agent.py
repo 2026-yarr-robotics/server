@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import signal
 import socketserver
 import subprocess
@@ -36,6 +37,15 @@ PORT = 8099
 _SCRIPT_DIR = Path(__file__).resolve().parent
 CUP_STACK_DIR = _SCRIPT_DIR.parent / "ros2-cup-stack" / "ros2" / "src" / "cup_stack"
 ROS2_WORKSPACE = CUP_STACK_DIR.parent.parent  # ros2-cup-stack/ros2/
+
+# cup_stack_agent LLM-loop launcher. The agent repo's start.sh lives at the
+# integration root (one level up from server/). It is NOT a `ros2 launch`
+# target — start.sh self-sources ROS/Ollama and forwards USER_COMMAND as the
+# aggregator's user_command param. The containerised server delegates the loop
+# here (via POST /task/start command="cup_stack_agent") so start.sh runs on the
+# host, where the agent repo + ROS env actually exist.
+AGENT_COMMAND = "cup_stack_agent"
+AGENT_DIR = _SCRIPT_DIR.parent / "cup_stack_agent"
 
 # ── cup_stack_agent LLM-loop logs ──────────────────────────────────────────────
 # The agent (cup_stack_agent) writes per-node logs to
@@ -176,7 +186,42 @@ _task_logs: dict[str, list[str]] = {}
 _task_statuses: dict[str, str] = {}  # idle | running | failed
 
 
+# A task can finish its real work successfully yet exit non-zero because a
+# sibling launch node (e.g. MoveItPy) SIGABRTs on teardown. A node that knows it
+# succeeded prints this sentinel to its log; we then trust it over the launch rc.
+TASK_SUCCESS_SENTINEL = "TASK_RESULT=SUCCESS"
+
+
+def _decide_task_status(rc: int | None, log_lines: list[str]) -> str:
+    """Map a finished task's exit code + log to a status.
+
+    idle on a clean exit (rc == 0), OR when the log carries the explicit success
+    sentinel (overrides a non-zero rc caused by a sibling node's teardown crash);
+    failed otherwise.
+    """
+    if rc == 0:
+        return "idle"
+    if any(TASK_SUCCESS_SENTINEL in ln for ln in log_lines):
+        return "idle"
+    return "failed"
+
+
 def _build_task_cmd(command: str, args: dict[str, str]) -> list[str]:
+    # The cup_stack_agent LLM loop is launched via its own start.sh (which
+    # self-sources ROS/Ollama and forwards USER_COMMAND), NOT via `ros2 launch`.
+    # Run it from the agent dir so its relative log paths (logs/<RUN_ID>/...)
+    # resolve, and pass the natural-language command through the USER_COMMAND env.
+    if command == AGENT_COMMAND:
+        user_command = str(args.get("user_command", "") or "")
+        env_prefix = (
+            f"USER_COMMAND={shlex.quote(user_command)} " if user_command else ""
+        )
+        full = (
+            f"cd {shlex.quote(str(AGENT_DIR))} && "
+            f"{env_prefix}bash start.sh --real-api"
+        )
+        return ["bash", "-c", full]
+
     # colcon builds the cup_stack overlay at the ros2-cup-stack root
     # (ros2-cup-stack/install), NOT under ros2/. The old ROS2_WORKSPACE/install
     # (= ros2-cup-stack/ros2/install) never existed, so the overlay was never
@@ -211,8 +256,11 @@ def _read_task_output(command: str, proc: subprocess.Popen[bytes]) -> None:
     with _tasks_lock:
         rc = proc.poll()
         if _task_statuses.get(command) == "running":
-            _task_statuses[command] = "idle" if rc == 0 else "failed"
-    logger.info("task '%s' exited (rc=%s)", command, proc.returncode)
+            _task_statuses[command] = _decide_task_status(
+                rc, _task_logs.get(command, []))
+        final = _task_statuses.get(command)
+    logger.info(
+        "task '%s' exited (rc=%s, status=%s)", command, proc.returncode, final)
 
 
 # ── HTTP handler ───────────────────────────────────────────────────────────────

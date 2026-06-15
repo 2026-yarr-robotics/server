@@ -18,7 +18,7 @@ import numpy as np
 
 from ..config import RobotHome, WorkspaceLimits
 from ..ros.bridge import RosBridge
-from ..ros.launch import BRINGUP_COMMANDS, LaunchManager, TaskStatus
+from ..ros.launch import AGENT_COMMAND, BRINGUP_COMMANDS, LaunchManager, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -376,6 +376,8 @@ class RobotDomain:
         sim: bool = False,
         stand_cup_margin_m: float | None = None,
         place_safe_z_min: float | None = None,
+        place_cup_tilt_deg: float | None = None,
+        place_plus_y_cup_tilt_deg: float | None = None,
     ) -> dict[str, Any]:
         """넘어진 컵 세우기 태스크(fallen_cup_recovery launch)를 시작한다.
 
@@ -402,6 +404,10 @@ class RobotDomain:
             args["stand_cup_margin_m"] = str(stand_cup_margin_m)
         if place_safe_z_min is not None:
             args["place_safe_z_min"] = str(place_safe_z_min)
+        if place_cup_tilt_deg is not None:
+            args["place_cup_tilt_deg"] = str(place_cup_tilt_deg)
+        if place_plus_y_cup_tilt_deg is not None:
+            args["place_plus_y_cup_tilt_deg"] = str(place_plus_y_cup_tilt_deg)
         return await self.start_task("fallen_cup_recovery", args)
 
     async def start_outlier_cup_recovery(
@@ -638,21 +644,16 @@ class RobotDomain:
         )
         return result if result else {"success": False, "message": "Service call failed"}
 
-    async def send_user_command(self, text: str) -> dict[str, Any]:
-        """Forward a natural-language command to the LLM agent loop.
+    async def run_agent(self, text: str) -> dict[str, Any]:
+        """Run the cup_stack_agent LLM loop for a natural-language command.
 
-        Publishes the raw text on ``/user_command`` (``std_msgs/msg/String``),
-        the single world-state input perception cannot supply. The
-        goal_state_publisher → llm_node planner consumes it.
+        A user command (e.g. "3단 쌓아줘") launches the agent's own
+        ``start.sh --real-api`` as a local subprocess, passing the text via the
+        ``USER_COMMAND`` env var (start.sh forwards it as the aggregator node's
+        ``user_command`` ROS parameter). Re-sending a command restarts the loop.
         """
-        if not self._bridge.connected:
-            raise ConnectionError("rosbridge not connected")
-        self._bridge.publish(
-            "/user_command",
-            "std_msgs/msg/String",
-            {"data": text},
-        )
-        return {"success": True, "message": f"user command published: {text}"}
+        await self._launcher.start(AGENT_COMMAND, {"user_command": text})
+        return {"success": True, "message": f"agent started: {text}"}
 
     async def get_log(self, name: str, tail: int = 50) -> list[str]:
         return await self._launcher.get_log(name, tail)

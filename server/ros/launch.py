@@ -47,7 +47,16 @@ _LOG_NOISE = frozenset([
 #   Same MoveItPy/dsr_moveit_controller contention as fallen_cup_recovery, so
 #   RobotDomain.start_outlier_cup_recovery also stops skill_api first.
 TASK_COMMANDS: set[str] = {"fallen_cup_recovery", "outlier_cup_recovery"}
-ALL_COMMANDS = BRINGUP_COMMANDS | TASK_COMMANDS | SERVICE_COMMANDS
+# cup_stack_agent LLM closed-loop, launched on a user command via
+# /api/robot/command. It runs the agent's own start.sh (NOT a ros2 launch), is
+# long-lived, and DRIVES action tasks itself (it POSTs /fallen-cup/recovery), so
+# it must neither count as nor be blocked by an action task.
+AGENT_COMMAND = "cup_stack_agent"
+AGENT_COMMANDS: set[str] = {AGENT_COMMAND}
+# Commands that are not mutually-exclusive action tasks (long-lived services +
+# the agent loop) — excluded from the single-action-task gate.
+NON_ACTION_COMMANDS = SERVICE_COMMANDS | AGENT_COMMANDS
+ALL_COMMANDS = BRINGUP_COMMANDS | TASK_COMMANDS | SERVICE_COMMANDS | AGENT_COMMANDS
 
 
 class TaskStatus(str, Enum):
@@ -107,7 +116,7 @@ class LaunchManager:
     @property
     def active_action_task(self) -> RunningTask | None:
         for task in self._tasks.values():
-            if task.status == TaskStatus.RUNNING and task.command not in SERVICE_COMMANDS:
+            if task.status == TaskStatus.RUNNING and task.command not in NON_ACTION_COMMANDS:
                 return task
         return None
 
@@ -135,6 +144,11 @@ class LaunchManager:
 
         if command in BRINGUP_COMMANDS:
             return await self._start_bringup(command, args)
+
+        if command in AGENT_COMMANDS:
+            # Not an action task: bypass the single-action gate and restart any
+            # running loop (a new user command supersedes the old one).
+            return await self._start_agent(args)
 
         active = self.active_action_task
         if active is not None:
@@ -312,6 +326,71 @@ class LaunchManager:
             self._read_output(task)
         )
         logger.info("Started task '%s' (pid %d)", command, process.pid)
+        return task
+
+    async def _start_agent(self, args: dict[str, Any]) -> RunningTask:
+        """Launch the cup_stack_agent LLM loop via its own ``start.sh --real-api``.
+
+        With a bringup-agent URL set (containerised prod), delegate to the host
+        agent so start.sh runs on the host — where the agent repo and a ROS env
+        actually exist (the container has neither). Without it (local dev), run
+        start.sh as a local subprocess. Either way start.sh self-sources ROS/
+        Ollama and forwards ``USER_COMMAND`` as the aggregator's ``user_command``
+        param. A new user command supersedes any running loop.
+        """
+        # ── containerised prod: delegate start.sh to the host bringup agent ──
+        if self._agent_url:
+            existing = self._tasks.get(AGENT_COMMAND)
+            if existing is not None and existing.status == TaskStatus.RUNNING:
+                await self._stop_task_via_agent(AGENT_COMMAND)
+                fut = self._log_futures.pop(AGENT_COMMAND, None)
+                if fut:
+                    fut.cancel()
+            return await self._start_task_via_agent(AGENT_COMMAND, args)
+
+        # ── local dev: run start.sh as a local subprocess ──
+        # A new user command supersedes the running loop: stop it first so we
+        # never stack two agents (start.sh also self-cleans stale processes).
+        existing = self._tasks.get(AGENT_COMMAND)
+        if existing is not None and existing.status == TaskStatus.RUNNING:
+            await self._stop_local(existing)
+
+        agent_dir = self._workspace.agent_dir
+        script = self._workspace.agent_start_script
+        if not (agent_dir / script).exists():
+            raise FileNotFoundError(
+                f"agent start script not found: {agent_dir / script}"
+            )
+
+        user_command = str(args.get("user_command") or "").strip()
+        env = os.environ.copy()
+        env.setdefault("PATH", "/opt/ros/humble/bin:" + env.get("PATH", ""))
+        if user_command:
+            env["USER_COMMAND"] = user_command
+
+        process = await asyncio.create_subprocess_shell(
+            f"bash {script} --real-api",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+            cwd=str(agent_dir),
+            preexec_fn=os.setsid,
+        )
+
+        task = RunningTask(
+            name=AGENT_COMMAND,
+            command=AGENT_COMMAND,
+            args=args,
+            process=process,
+        )
+        self._tasks[AGENT_COMMAND] = task
+        self._log_futures[AGENT_COMMAND] = asyncio.create_task(
+            self._read_output(task)
+        )
+        logger.info(
+            "Started agent '%s' (pid %d) user_command=%r",
+            AGENT_COMMAND, process.pid, user_command or "(default)",
+        )
         return task
 
     # ── Stop ──────────────────────────────────────────────────────────────────

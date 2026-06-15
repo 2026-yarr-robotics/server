@@ -229,8 +229,8 @@ class RecoverResponse(BaseModel):
 class UserCommandRequest(BaseModel):
     text: str = Field(
         ...,
-        description="자연어 명령. /user_command (std_msgs/String) 으로 발행되어 "
-        "LLM 에이전트(goal_state_publisher → llm_node)가 소비한다.",
+        description="자연어 명령. cup_stack_agent 의 start.sh --real-api 를 띄우며 "
+        "USER_COMMAND 로 전달된다 (aggregator 의 user_command 파라미터로 흘러간다).",
     )
 
     model_config = _example({"text": "3단 피라미드 쌓아줘"})
@@ -242,7 +242,7 @@ class UserCommandResponse(BaseModel):
 
     model_config = _example({
         "success": True,
-        "message": "user command published: 3단 피라미드 쌓아줘",
+        "message": "agent started: 3단 피라미드 쌓아줘",
     })
 
 

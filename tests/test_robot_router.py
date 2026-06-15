@@ -50,6 +50,41 @@ class TestRobotStatusEndpoint:
         assert "tasks" in data
 
 
+class TestUserCommandEndpoint:
+    def test_command_launches_agent_with_user_command(
+        self, client: TestClient, mock_launcher,
+    ):
+        mock_launcher.start.return_value = _make_running_task("cup_stack_agent")
+        resp = client.post("/api/robot/command", json={"text": "3단 쌓아줘"})
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+
+        called_command, called_args = mock_launcher.start.call_args[0]
+        assert called_command == "cup_stack_agent"
+        assert called_args == {"user_command": "3단 쌓아줘"}
+
+    def test_command_strips_text_before_launch(
+        self, client: TestClient, mock_launcher,
+    ):
+        mock_launcher.start.return_value = _make_running_task("cup_stack_agent")
+        resp = client.post("/api/robot/command", json={"text": "  3단 쌓아줘  "})
+        assert resp.status_code == 200
+        _cmd, called_args = mock_launcher.start.call_args[0]
+        assert called_args == {"user_command": "3단 쌓아줘"}
+
+    def test_command_empty_text_returns_400(self, client: TestClient, mock_launcher):
+        resp = client.post("/api/robot/command", json={"text": "   "})
+        assert resp.status_code == 400
+        mock_launcher.start.assert_not_called()
+
+    def test_command_missing_script_returns_500(
+        self, client: TestClient, mock_launcher,
+    ):
+        mock_launcher.start.side_effect = FileNotFoundError("start.sh not found")
+        resp = client.post("/api/robot/command", json={"text": "3단 쌓아줘"})
+        assert resp.status_code == 500
+
+
 class TestPyramidConfigEndpoint:
     def test_get_pyramid_config_uses_configured_home_xy(
         self,
@@ -318,28 +353,37 @@ class TestFallenCupEndpoints:
         resp = client.post("/api/robot/fallen-cup/recovery", json={"mode": "throw"})
         assert resp.status_code == 422
 
-    def test_recovery_z_safety_params_forwarded(self, client: TestClient, mock_launcher):
-        """그리퍼-바닥 충돌 방지용 Z 안전 파라미터가 launch 인자로 전달되는지."""
+    def test_recovery_place_params_forwarded(self, client: TestClient, mock_launcher):
+        """place 모드 파라미터가 launch 인자로 전달되는지."""
         mock_launcher.start.return_value = _make_running_task("fallen_cup_recovery")
         resp = client.post(
             "/api/robot/fallen-cup/recovery",
-            json={"mode": "place", "stand_cup_margin_m": 0.10, "place_safe_z_min": 0.20},
+            json={
+                "mode": "place",
+                "stand_cup_margin_m": 0.10,
+                "place_safe_z_min": 0.20,
+                "place_cup_tilt_deg": 15.0,
+                "place_plus_y_cup_tilt_deg": 15.0,
+            },
         )
         assert resp.status_code == 200
         _, called_args = mock_launcher.start.call_args[0]
         assert called_args["stand_cup_margin_m"] == "0.1"
         assert called_args["place_safe_z_min"] == "0.2"
+        assert called_args["place_cup_tilt_deg"] == "15.0"
+        assert called_args["place_plus_y_cup_tilt_deg"] == "15.0"
 
-    def test_recovery_z_safety_params_omitted_uses_launch_defaults(
+    def test_recovery_default_place_params_are_server_side(
         self, client: TestClient, mock_launcher,
     ):
         mock_launcher.start.return_value = _make_running_task("fallen_cup_recovery")
         resp = client.post("/api/robot/fallen-cup/recovery", json={"mode": "place"})
         assert resp.status_code == 200
         _, called_args = mock_launcher.start.call_args[0]
-        # 생략 시 launch 기본값 사용 → args에 포함하지 않음
-        assert "stand_cup_margin_m" not in called_args
+        assert called_args["stand_cup_margin_m"] == "-0.065"
         assert "place_safe_z_min" not in called_args
+        assert called_args["place_cup_tilt_deg"] == "15.0"
+        assert called_args["place_plus_y_cup_tilt_deg"] == "15.0"
 
     def test_recovery_conflict_returns_409(self, client: TestClient, mock_launcher):
         mock_launcher.start.side_effect = RuntimeError("Task 'x' is already running")

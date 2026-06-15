@@ -15,6 +15,20 @@ def _server_dir() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _default_agent_dir() -> Path:
+    """cup_stack_agent dir (the LLM closed-loop ``start.sh`` lives here).
+
+    Honors ``CUP_AGENT_DIR``. The ``__file__``-relative fallback only holds
+    when the server runs from the integration checkout (local dev): parents[2]
+    is the integration repo root, with ``cup_stack_agent`` as a sibling of
+    ``server/``. A pip-installed/Docker layout must set ``CUP_AGENT_DIR``.
+    """
+    env = os.getenv("CUP_AGENT_DIR")
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parents[2] / "cup_stack_agent"
+
+
 def _default_state_dir() -> Path:
     """Writable dir for runtime state that must survive container restarts.
 
@@ -67,6 +81,9 @@ class WorkspaceConfig:
     launch_package: str = "cup_stack"
     bringup_sim_script: str = "bringup_sim.sh"
     bringup_real_script: str = "bringup_real.sh"
+    # cup_stack_agent LLM-loop launcher (run on a user command via /api/robot/command).
+    agent_dir: Path = field(default_factory=_default_agent_dir)
+    agent_start_script: str = "start.sh"
 
     @property
     def src_dir(self) -> Path:
