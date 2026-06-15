@@ -89,11 +89,17 @@ class CameraStream:
         while not self._stopping:
             try:
                 # CompressedImage 한 프레임이 수십 KB이므로 max_size를 넉넉히.
+                # ping_interval=None: disable the websockets-legacy client
+                # keepalive. Under send-buffer back-pressure its keepalive_ping
+                # task hits an internal drain race (AssertionError in
+                # _drain_helper -> "keepalive ping failed") and tears the
+                # connection down, causing periodic ~1s camera dropouts. We are
+                # a read-only subscriber, so liveness is detected by a recv
+                # inactivity timeout instead (frames arrive at ~10 Hz).
                 async with websockets.connect(
                     uri,
                     max_size=32 * 1024 * 1024,
-                    ping_interval=20,
-                    ping_timeout=20,
+                    ping_interval=None,
                 ) as ws:
                     backoff = 1.0
                     await ws.send(json.dumps({
@@ -108,7 +114,15 @@ class CameraStream:
                         "rosbridge subscribe sent: topic=%s compression=cbor-raw",
                         self._topic,
                     )
-                    async for raw in ws:
+                    while not self._stopping:
+                        try:
+                            raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "camera %s: no frame for 10s; reconnecting",
+                                self._topic,
+                            )
+                            break
                         self._handle_message(raw)
             except asyncio.CancelledError:
                 break
