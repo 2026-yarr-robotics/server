@@ -70,6 +70,19 @@ UNSTACK_SEQUENCE: tuple[str, ...] = ("3m", "2r", "2l", "1r", "1m", "1l")
 DEFAULT_UNSTACK_DEST_X = 0.400
 DEFAULT_UNSTACK_DEST_Y = 0.100
 
+# Yaw twist (deg) applied to the unstack grip orientation. Set to 90.0 to hold
+# the wrist (J6) at the joint-HOME yaw ([0,0,90,0,90,90]) so it never swings
+# ~90° between HOME and a pick/place (== the skill package's PICK_ORI,
+# make_twist_orientation(90)). Forwarded to skill_api /skill/pyramid_step;
+# build (pyramid_skill) is unaffected (always 0.0).
+#
+# Default 0.0 (natural down grip): the wrist-swing fix is instead handled by
+# (1) skipping the per-cup HOME return (one HOME per teardown, not six) and
+# (3) the OMPL nearest-wrist constraint (runtime.WRIST_NEAREST_TOL) preventing
+# 180° wraps — no grip-geometry change, so no finger/cup collision risk. Flip
+# to 90.0 to additionally null the first/last genuine HOME<->grip swing.
+UNSTACK_GRIP_TWIST_DEG = 0.0
+
 # ── Safety-stop ("yellow light") auto-recovery ───────────────────────────────
 # A velocity/acceleration-limit violation drops the Doosan controller into a
 # safety-stopped state (the amber/yellow status lamp). Unlike a red EMERGENCY
@@ -1193,6 +1206,7 @@ class RobotDomain:
         x: float,
         y: float,
         nested: int = 1,
+        home: bool = True,
     ) -> dict[str, Any]:
         """Pick the cup sitting in a pyramid ``slot`` and nest it at (x, y).
 
@@ -1256,8 +1270,16 @@ class RobotDomain:
             "place_y": float(y),
             "place_z": place_z,
             "slot": slot,
+            # Hold the wrist at the HOME J6 yaw so it doesn't swing ~90° per
+            # cup (avoids the alarm-1908 wrist-velocity spike on high picks).
+            "grip_twist_deg": UNSTACK_GRIP_TWIST_DEG,
+            # Skip the per-cup return to HOME except where the caller wants it
+            # (the last cup of a sequence): far faster, no per-cup round-trip.
+            "home": home,
         }
-        logger.info("unstack_skill (nested=%d) -> %s", nested, payload)
+        logger.info(
+            "unstack_skill (nested=%d, home=%s) -> %s", nested, home, payload
+        )
         return await self._post_pyramid_step(payload)
 
     async def unstack_all_skill(
@@ -1309,6 +1331,10 @@ class RobotDomain:
 
         for index, slot in enumerate(UNSTACK_SEQUENCE, start=1):
             nested = index  # destination column height: 1st cup=1 … 6th cup=6
+            # Return to HOME only after the final cup — intermediate cups keep
+            # the wrist at the grip yaw and stay low, so the whole teardown
+            # homes once instead of six times (much faster, no per-cup swing).
+            home = index == total
             last_err: Exception | None = None
             step_detail = ""
             attempts = 0
@@ -1316,7 +1342,7 @@ class RobotDomain:
             for attempt in range(1, max_retry + 1):
                 attempts = attempt
                 try:
-                    result = await self.unstack_skill(slot, x, y, nested)
+                    result = await self.unstack_skill(slot, x, y, nested, home=home)
                     step_detail = str(result.get("detail", ""))
                     last_err = None
                     break
