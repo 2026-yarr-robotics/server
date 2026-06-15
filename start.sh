@@ -2,10 +2,9 @@
 # start.sh — 컵 스태킹 로봇 시스템 통합 실행 스크립트
 #
 # 사용법:
-#   ./start.sh                     # rosbridge + exo·hand 카메라 + exo perception + bringup-agent + Docker + agent
+#   ./start.sh                     # rosbridge + exo/hand camera + vision + bringup-agent + Docker
 #   WITH_HAND_CAM=false ./start.sh # hand 카메라 끄기 (USB 충돌 시)
-#   WITH_AGENT=false ./start.sh    # cup_stack_agent(LLM 폐루프) 창 끄기
-#   AGENT_REAL_API=false ./start.sh# agent 를 dry-run 으로 (로봇 API POST 안 함)
+#   # cup_stack_agent is started manually from ../cup_stack_agent
 #
 # bringup은 웹 대시보드(https://yarr.simplyimg.com)에서 버튼으로 제어합니다.
 
@@ -47,13 +46,10 @@ esac
 # 안 겹치면 90 / -90 / 180 으로 바꿔 재실행.
 VISION_WORLD_BASE_YAW="${VISION_WORLD_BASE_YAW:-0}"
 
-# cup_stack_agent(LLM 폐루프 실험)도 이 start.sh 가 함께 띄워 단일 진입점이 되게
-# 한다. agent 노드들(aggregator/digital_twin_stabilizer/goal_state_publisher/
-# llm_node/plan_executor[/pick_node])은 'agent' tmux 창에서 cup_stack_agent/start.sh
-# 로 기동된다. WITH_AGENT=false 로 끄고, AGENT_REAL_API=false 면 dry-run(로봇 API
-# POST 안 함; pick_node 미기동).
-WITH_AGENT="${WITH_AGENT:-true}"
-AGENT_REAL_API="${AGENT_REAL_API:-true}"
+# cup_stack_agent is no longer launched from this script. Start it manually
+# from ../cup_stack_agent when you want to run the LLM loop. WITH_AGENT is
+# kept only to warn old commands that still set it.
+WITH_AGENT="${WITH_AGENT:-false}"
 
 # ── 사전 확인 ──────────────────────────────────────────────
 if [[ ! -f "$ROS_SETUP" ]]; then
@@ -229,32 +225,11 @@ tmux send-keys -t "$SESSION:gripper" \
 
 # (Docker 서버 창은 창 #1 로 이동했다 — 세션 생성부 참고.)
 
-# ── 창: cup_stack_agent (LLM 폐루프 실험) ─────────────────
-# cup_stack_agent/start.sh 의 노드들(aggregator/digital_twin_stabilizer/
-# goal_state_publisher/llm_node/plan_executor[/pick_node])을 한 창에서 함께 띄워
-# 이 start.sh 를 단일 진입점으로 만든다. agent 는 실제 로봇 API(localhost nginx
-# :80 → robot:8001)와 vision 파이프라인(/digital_twin/boxes)에 의존하므로 Docker·
-# 카메라·비전이 올라올 시간을 준 뒤 기동한다. pick_node 의 moveit_py 를 위해
-# ros2_ws($DOOSAN_SETUP)도 함께 source 한다.
-#
-# 통합 기동은 'agent 준비 환경'만 띄우고 skill(예: 3단 피라미드)을 자동 실행하지
-# 않는다 — 실제 명령은 런타임에 대시보드 명령창(POST /api/robot/command ->
-# /user_command) 또는 루트의 send_command.sh 에서 들어온다. cup_stack_agent 는
-# 수정하지 않고 여기(server/start.sh)에서만 막는다:
-#   - cup_stack_agent/start.sh 의 USER_COMMAND 기본값은 '3단 피라미드 쌓아줘'
-#     하드코딩이고 ${USER_COMMAND:-...} 는 '빈 문자열'을 그 기본값으로 치환한다.
-#   - 그래서 빈 문자열 대신 '공백 한 칸'을 넘긴다. aggregator 는 그대로 발행하지만
-#     goal_state_publisher 가 `msg.data.strip() or None` 로 공백을 None 처리 →
-#     user_command=None → 콜드스타트(플랜 null), 자동 발사 없음.
-# (자동 발행이 필요하면 USER_COMMAND="3단 쌓아줘" WITH_AGENT=true 로 override.)
+# ── cup_stack_agent ─────────────────────────────────────
+# Do not launch cup_stack_agent/start.sh from server/start.sh. Start it
+# manually from ../cup_stack_agent when you want to run the LLM loop.
 if [[ "$WITH_AGENT" == "true" ]]; then
-    AGENT_DIR="$SCRIPT_DIR/../cup_stack_agent"
-    AGENT_ARGS=""
-    [[ "$AGENT_REAL_API" == "true" ]] && AGENT_ARGS="--real-api"
-    AGENT_USER_COMMAND="${USER_COMMAND:- }"   # 기본 공백 = 자동 발행 안 함
-    tmux new-window -t "$SESSION" -n "agent"
-    tmux send-keys -t "$SESSION:agent" \
-        "source $ROS_SETUP && source $DOOSAN_SETUP && cd $AGENT_DIR && sleep 25 && USER_COMMAND='$AGENT_USER_COMMAND' ./start.sh $AGENT_ARGS" Enter
+    echo "[WARN] WITH_AGENT=true is ignored; start cup_stack_agent/start.sh manually."
 fi
 
 # ── 포커스 ──────────────────────────────────────────────
@@ -273,15 +248,7 @@ if [[ "$WITH_HAND_CAM" == "true" ]]; then
 else
     echo "   cam-hand 는 미기동 (WITH_HAND_CAM=false 로 꺼짐)"
 fi
-if [[ "$WITH_AGENT" == "true" ]]; then
-    if [[ "$AGENT_REAL_API" == "true" ]]; then
-        echo "   agent (cup_stack_agent, --real-api)  ← LLM 폐루프 (끄려면 WITH_AGENT=false)"
-    else
-        echo "   agent (cup_stack_agent, dry-run)  ← AGENT_REAL_API=true 로 로봇 API 폐루프"
-    fi
-else
-    echo "   agent 는 미기동 (WITH_AGENT=false 로 꺼짐)"
-fi
+echo "   agent 는 자동 기동하지 않음 (cup_stack_agent/start.sh 를 별도 실행)"
 echo " ROS_DOMAIN_ID=${ROS_DOMAIN_ID}"
 echo " 세션 종료:   tmux kill-session -t $SESSION"
 echo ""
