@@ -82,8 +82,13 @@ PATTERNS=(
     # view:=exo|hand). cmdline 에 'realsense2_camera' 가 없어 위 패턴에 안 잡혀
     # 별도로 정리한다 (안 그러면 launch 부모가 노드 종료 후에도 잔존).
     "cameras_only.launch.py"
-    # rosbridge (rosbridge_websocket_launch.xml → rosbridge_websocket 노드)
+    # rosbridge (rosbridge_websocket_launch.xml → rosbridge_websocket + rosapi)
+    # rosbridge launch starts both rosbridge_websocket and rosapi_node.
+    # On repeated restarts rosapi_node can survive as a systemd-user orphan,
+    # so match the launch parent and both child executables explicitly.
+    "rosbridge_websocket_launch.xml"
     "rosbridge_websocket"
+    "rosapi_node"
     # bringup 에이전트 (포트 8099)
     "bringup_agent.py"
     # cup_stack_agent (LLM 폐루프) 노드들 — cwd 상대경로라 파일명으로 매칭
