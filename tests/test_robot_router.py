@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -278,3 +279,168 @@ class TestFallenCupEndpoints:
         c = TestClient(app)
         resp = c.get("/api/robot/fallen-cup/state")
         assert resp.status_code == 503
+
+
+def _routed_call_service(*, states, moves, control_ok=True, mode_ok=True):
+    """Build an async side_effect for bridge.call_service that dispatches by
+    service name. ``states`` is consumed once per get_robot_state call;
+    ``moves`` once per move_line call."""
+    state_it = iter(states)
+    move_it = iter(moves)
+
+    async def _call(service_name, service_type, args=None, timeout=10.0):
+        if service_name.endswith("get_robot_state"):
+            return {"robot_state": next(state_it), "success": True}
+        if service_name.endswith("set_robot_control"):
+            return {"success": control_ok}
+        if service_name.endswith("set_robot_mode"):
+            return {"success": mode_ok}
+        if service_name.endswith("move_line"):
+            return next(move_it)
+        return {}
+
+    return _call
+
+
+class TestMoveSafetyStopRecovery:
+    def test_move_success_no_recovery(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        robot_domain._bridge.call_service.side_effect = _routed_call_service(
+            states=[], moves=[{"success": True}],
+        )
+        resp = client.post(
+            "/api/robot/move", json={"x": 0.45, "y": 0.0, "z": 0.30},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["recovered"] is False
+
+    def test_move_recovers_safe_stop_and_retries(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        # 1st move trips a safe stop; recover (SAFE_STOP -> STANDBY); retry ok.
+        robot_domain._bridge.call_service.side_effect = _routed_call_service(
+            states=[5, 1],  # SAFE_STOP detected, then STANDBY after reset
+            moves=[{"success": False, "message": "safe stop"}, {"success": True}],
+        )
+        resp = client.post(
+            "/api/robot/move", json={"x": 0.45, "y": 0.0, "z": 0.30},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["success"] is True
+        assert body["recovered"] is True
+
+    def test_move_retry_uses_reduced_speed(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        calls: list[dict] = []
+        states = iter([5, 1])
+        results = iter([{"success": False, "message": "safe stop"}, {"success": True}])
+
+        async def _call(service_name, service_type, args=None, timeout=10.0):
+            if service_name.endswith("get_robot_state"):
+                return {"robot_state": next(states), "success": True}
+            if service_name.endswith("move_line"):
+                calls.append(args)
+                return next(results)
+            return {"success": True}
+
+        robot_domain._bridge.call_service.side_effect = _call
+        resp = client.post(
+            "/api/robot/move", json={"x": 0.45, "y": 0.0, "z": 0.30},
+        )
+        assert resp.status_code == 200
+        assert len(calls) == 2
+        # retry velocity/accel are scaled below the first attempt.
+        assert calls[1]["vel"][0] < calls[0]["vel"][0]
+        assert calls[1]["acc"][0] < calls[0]["acc"][0]
+
+    def test_move_failure_without_safe_stop_not_retried(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        move_calls = {"n": 0}
+        states = iter([1])  # STANDBY -> nothing to recover
+
+        async def _call(service_name, service_type, args=None, timeout=10.0):
+            if service_name.endswith("get_robot_state"):
+                return {"robot_state": next(states), "success": True}
+            if service_name.endswith("move_line"):
+                move_calls["n"] += 1
+                return {"success": False, "message": "planning failed"}
+            return {"success": True}
+
+        robot_domain._bridge.call_service.side_effect = _call
+        resp = client.post(
+            "/api/robot/move", json={"x": 0.45, "y": 0.0, "z": 0.30},
+        )
+        assert resp.status_code == 409  # surfaced, not retried
+        assert move_calls["n"] == 1
+
+
+class TestRecoverEndpoint:
+    def test_recover_safe_stop_to_standby(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        robot_domain._bridge.call_service.side_effect = _routed_call_service(
+            states=[5, 1], moves=[],
+        )
+        resp = client.post("/api/robot/recover")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["recovered"] is True
+        assert body["from_state_name"] == "SAFE_STOP"
+        assert body["to_state_name"] == "STANDBY"
+
+    def test_recover_noop_when_standby(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        robot_domain._bridge.call_service.side_effect = _routed_call_service(
+            states=[1], moves=[],
+        )
+        resp = client.post("/api/robot/recover")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["recovered"] is True
+        assert "no safety stop" in body["detail"]
+
+    def test_recover_emergency_stop_not_cleared(
+        self, client: TestClient, robot_domain: RobotDomain,
+    ):
+        robot_domain._bridge.call_service.side_effect = _routed_call_service(
+            states=[6], moves=[],  # EMERGENCY_STOP
+        )
+        resp = client.post("/api/robot/recover")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["recovered"] is False
+        assert body["from_state_name"] == "EMERGENCY_STOP"
+
+
+class TestSkillSafetyStopRecovery:
+    def test_skill_failure_clears_safe_stop(self, robot_domain: RobotDomain):
+        robot_domain._bridge.call_service.side_effect = _routed_call_service(
+            states=[5, 1], moves=[],  # SAFE_STOP -> STANDBY
+        )
+
+        def boom() -> dict:
+            raise RuntimeError("500: mid-skill safe stop")
+
+        with pytest.raises(RuntimeError) as ei:
+            asyncio.run(robot_domain._run_skill_call(boom))
+        assert "safety stop cleared" in str(ei.value)
+
+    def test_skill_failure_without_safe_stop_passthrough(
+        self, robot_domain: RobotDomain,
+    ):
+        robot_domain._bridge.call_service.side_effect = _routed_call_service(
+            states=[1], moves=[],  # STANDBY -> nothing to clear
+        )
+
+        def boom() -> dict:
+            raise RuntimeError("422: bad request")
+
+        with pytest.raises(RuntimeError) as ei:
+            asyncio.run(robot_domain._run_skill_call(boom))
+        assert "safety stop cleared" not in str(ei.value)
+        assert "422" in str(ei.value)

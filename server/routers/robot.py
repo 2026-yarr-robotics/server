@@ -24,6 +24,7 @@ from ..schemas import (
     PyramidConfigUpdate,
     PyramidSkillRequest,
     PyramidSkillResponse,
+    RecoverResponse,
     RobotStatusResponse,
     ScanSkillResponse,
     ScanSquareSkillResponse,
@@ -172,6 +173,19 @@ async def move_robot(body: MoveRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(e))
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/recover", response_model=RecoverResponse)
+async def recover_safe_stop() -> dict:
+    """Clear a Doosan safety stop (accel/vel-limit "yellow light") in place,
+    without restarting bringup.
+
+    No-op (``recovered=true``) when the robot is not stopped. The collision
+    SAFE_STOP2 states and a red EMERGENCY_STOP are *not* auto-cleared
+    (``recovered=false`` with a detail message) — escalate to a bringup
+    restart or release the physical button.
+    """
+    return await _get_domain().recover_safe_stop()
 
 
 @router.post("/command", response_model=UserCommandResponse)
