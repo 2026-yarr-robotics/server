@@ -140,6 +140,9 @@ def main() -> None:
         "server.entrypoints.handineye:app",
         host="0.0.0.0",
         port=settings.ports.handineye,
+        # See handtoeye: disable buggy server-side WS keepalive that tears the
+        # camera connection down under send back-pressure.
+        ws_ping_interval=None,
     )
 
 

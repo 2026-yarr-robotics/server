@@ -140,6 +140,12 @@ def main() -> None:
         "server.entrypoints.handtoeye:app",
         host="0.0.0.0",
         port=settings.ports.handtoeye,
+        # Disable the server-side WS keepalive ping. Under camera-stream
+        # send back-pressure the websockets-legacy keepalive task hits an
+        # internal drain race (AssertionError -> "keepalive ping failed")
+        # and tears the browser connection down. Liveness is covered by the
+        # stream's own sends failing when the client goes away.
+        ws_ping_interval=None,
     )
 
 
