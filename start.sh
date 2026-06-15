@@ -27,15 +27,18 @@ export ROS_LOCALHOST_ONLY=1
 # WITH_HAND_CAM=false ./start.sh 로 끈다.
 WITH_HAND_CAM="${WITH_HAND_CAM:-true}"
 
-# exo perception 의 RViz. world_origin_node 가 ArUco(ID 0)로 world 좌표계를
-# 잡는데, RViz 로 world 축이 로봇 base 와 맞는지 확인하고 Redetect 팝업으로
-# 재검출하는 초기화 작업이 필요하므로 기본 on. headless 면 VISION_RVIZ=false.
+# RViz 정책: 실험 중엔 verifier(cup_verify) RViz 만 본다.
+#  - VISION_RVIZ: verifier RViz 마스터(기본 on; ArUco world 정렬/Redetect 확인용.
+#    완전 headless 면 VISION_RVIZ=false).
+#  - DT_RVIZ: 무거운 digital_twin 파이프라인 RViz(기본 OFF — CPU 절감. perception
+#    디버깅 때만 DT_RVIZ=true).
 VISION_RVIZ="${VISION_RVIZ:-true}"
+DT_RVIZ="${DT_RVIZ:-false}"
 # 비전 파이프라인 모드. standalone = 단일 exo 카메라(검증된 production 9Hz
-# baseline). fusion = exo point_cloud를 producer 로 돌리고 cup_fusion_node 가
-# /digital_twin/boxes + /vision/cups_on_table 를 소유(검증된 exo-only 색계약).
-# hand dual-cam 은 eye-in-hand 캘리브/TF dedup 선결이라 여기 미포함.
-VISION_MODE="${VISION_MODE:-fusion}"
+# baseline; cup_fusion_node 없음 → CPU 절감 + flicker 적음). fusion = exo
+# point_cloud producer + cup_fusion_node 융합(무겁고 9Hz보다 불안정). 실험 기본은
+# standalone. hand dual-cam 은 캘리브/TF dedup 선결이라 미포함.
+VISION_MODE="${VISION_MODE:-standalone}"
 # standalone | fusion(exo-only producer+cup_fusion) | fusion_dual(exo+hand)
 case "$VISION_MODE" in
   fusion)      VISION_FUSION=true;  VISION_WITH_HAND=false ;;
@@ -180,7 +183,7 @@ tmux new-window -t "$SESSION" -n "vision-exo"
 # 카메라가 /exo/exo/* 발행을 시작할 시간을 준 뒤 파이프라인을 띄운다
 # (world_origin_node 의 ArUco 타임아웃이 카메라 부팅 전에 도는 것 방지).
 tmux send-keys -t "$SESSION:vision-exo" \
-    "source $ROS_SETUP && source $DEPTH_DT_SETUP && sleep 8 && ros2 launch depth_digital_twin digital_twin.launch.py camera_ns:=exo rviz:=$VISION_RVIZ control_panel:=false fusion:=$VISION_FUSION" Enter
+    "source $ROS_SETUP && source $DEPTH_DT_SETUP && sleep 8 && ros2 launch depth_digital_twin digital_twin.launch.py camera_ns:=exo rviz:=$DT_RVIZ control_panel:=false fusion:=$VISION_FUSION" Enter
 
 # ── 창: stack verifier (cup_stacking_verify) ──────────────
 # /digital_twin/boxes 를 받아 어느 슬롯이 채워졌는지 판정해 /vision/stack(+
