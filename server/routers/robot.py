@@ -29,6 +29,8 @@ from ..schemas import (
     RobotStatusResponse,
     ScanSkillResponse,
     ScanSquareSkillResponse,
+    StopAllRequest,
+    StopAllResponse,
     TaskLogResponse,
     TaskStartedResponse,
     TaskStartRequest,
@@ -117,6 +119,20 @@ async def stop_task(body: TaskStopRequest) -> dict:
         return await domain.stop_task(body.name)
     except KeyError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/stop", response_model=StopAllResponse)
+async def stop_all(body: StopAllRequest | None = None) -> dict:
+    """실행 중인 skill/task 를 즉시 멈추고 팔을 HOME 으로 복귀시킨다.
+
+    통합 정지(패닉/abort) 버튼용. 진행 중인 동기 skill(pyramid/unstack/…)은
+    skill_api_node 의 ``/stop`` 으로 인터럽트+HOME 하고, action task(fallen/
+    outlier/agent)는 프로세스를 kill 한다. ``task/stop`` 과 달리 정지할 대상
+    이름이 필요 없다 — 무엇이 돌고 있든 멈춘다.
+    """
+    domain = _get_domain()
+    home = True if body is None else body.home
+    return await domain.stop_all(home=home)
 
 
 @router.get("/task/log", response_model=TaskLogResponse)

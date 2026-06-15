@@ -155,6 +155,34 @@ class TaskStoppedResponse(BaseModel):
     model_config = _example({"name": "gripper", "status": "stopped"})
 
 
+class StopAllRequest(BaseModel):
+    home: bool = Field(
+        True, description="정지 후 팔을 HOME 으로 복귀시킬지 여부"
+    )
+
+    model_config = _example({"home": True})
+
+
+class StopAllResponse(BaseModel):
+    """실행 중인 skill/task 즉시 정지 + HOME 복귀 결과."""
+
+    success: bool
+    ros_stop: bool = False            # DRCF MoveStop 퀵스탑 전송 성공
+    interrupted: bool = False         # 진행 중인 모션을 실제로 끊었는지
+    killed_tasks: list[str] = []      # kill 한 task 이름들 (action task/agent)
+    homed: bool = False               # HOME 복귀 완료 여부
+    detail: str = ""
+
+    model_config = _example({
+        "success": True,
+        "ros_stop": True,
+        "interrupted": True,
+        "killed_tasks": [],
+        "homed": True,
+        "detail": "interrupted + homed",
+    })
+
+
 class TaskLogResponse(BaseModel):
     name: str
     log: list[str]
@@ -279,14 +307,24 @@ class FallenCupRecoveryRequest(BaseModel):
     dry_run: bool = Field(False, description="approach까지만 (gripper/descend/lift 스킵)")
     sim: bool = Field(False, description="카메라/그리퍼 HW 우회 (MoveIt virtual)")
     stand_cup_margin_m: Optional[float] = Field(
-        None, ge=-0.05, le=0.30,
-        description="place 모드: 컵 바닥-테이블 여유 (m). 생략 시 launch 기본값(+0.05). "
-                    "값을 키우면 release 높이가 올라가 안전하지만 컵이 튕길 수 있음",
+        -0.065, ge=-0.10, le=0.30,
+        description="place 모드: 컵 바닥-테이블 여유 (m). 기본 -0.065로 launch 기본(-0.05)보다 1.5cm 낮게 release. "
+                    "값을 낮추면 release 높이가 내려가고, 키우면 올라감",
     )
     place_safe_z_min: Optional[float] = Field(
         None, ge=0.05, le=0.40,
         description="place 모드: flange 최저 안전 z (m). 생략 시 launch 기본값(0.15). "
                     "그리퍼-바닥 충돌 방지 클램프",
+    )
+    place_cup_tilt_deg: Optional[float] = Field(
+        8.0, ge=-30.0, le=30.0,
+        description="place 모드: cup을 vertical에서 -EE_Z 방향으로 기울이는 각도(deg). "
+                    "기본 8deg를 서버 API에서 launch arg로 전달 (15deg에서 일부 컵이 넘어져 낮춤)",
+    )
+    place_plus_y_cup_tilt_deg: Optional[float] = Field(
+        8.0, ge=-30.0, le=30.0,
+        description="place 모드: plus_y auto_swing 발동 시 사용할 cup tilt 각도(deg). "
+                    "기본 8deg를 서버 API에서 launch arg로 전달 (15deg에서 일부 컵이 넘어져 낮춤)",
     )
 
     model_config = _example({"mode": "place", "multi_cup": False, "dry_run": False, "sim": False})
