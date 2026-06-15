@@ -155,34 +155,6 @@ class TaskStoppedResponse(BaseModel):
     model_config = _example({"name": "gripper", "status": "stopped"})
 
 
-class StopAllRequest(BaseModel):
-    home: bool = Field(
-        True, description="정지 후 팔을 HOME 으로 복귀시킬지 여부"
-    )
-
-    model_config = _example({"home": True})
-
-
-class StopAllResponse(BaseModel):
-    """실행 중인 skill/task 즉시 정지 + HOME 복귀 결과."""
-
-    success: bool
-    ros_stop: bool = False            # DRCF MoveStop 퀵스탑 전송 성공
-    interrupted: bool = False         # 진행 중인 모션을 실제로 끊었는지
-    killed_tasks: list[str] = []      # kill 한 task 이름들 (action task/agent)
-    homed: bool = False               # HOME 복귀 완료 여부
-    detail: str = ""
-
-    model_config = _example({
-        "success": True,
-        "ros_stop": True,
-        "interrupted": True,
-        "killed_tasks": [],
-        "homed": True,
-        "detail": "interrupted + homed",
-    })
-
-
 class TaskLogResponse(BaseModel):
     name: str
     log: list[str]
@@ -257,8 +229,8 @@ class RecoverResponse(BaseModel):
 class UserCommandRequest(BaseModel):
     text: str = Field(
         ...,
-        description="자연어 명령. cup_stack_agent 의 start.sh --real-api 를 띄우며 "
-        "USER_COMMAND 로 전달된다 (aggregator 의 user_command 파라미터로 흘러간다).",
+        description="자연어 명령. /user_command (std_msgs/String) 으로 발행되어 "
+        "LLM 에이전트(goal_state_publisher → llm_node)가 소비한다.",
     )
 
     model_config = _example({"text": "3단 피라미드 쌓아줘"})
@@ -270,7 +242,7 @@ class UserCommandResponse(BaseModel):
 
     model_config = _example({
         "success": True,
-        "message": "agent started: 3단 피라미드 쌓아줘",
+        "message": "user command published: 3단 피라미드 쌓아줘",
     })
 
 
@@ -307,9 +279,9 @@ class FallenCupRecoveryRequest(BaseModel):
     dry_run: bool = Field(False, description="approach까지만 (gripper/descend/lift 스킵)")
     sim: bool = Field(False, description="카메라/그리퍼 HW 우회 (MoveIt virtual)")
     stand_cup_margin_m: Optional[float] = Field(
-        -0.065, ge=-0.10, le=0.30,
-        description="place 모드: 컵 바닥-테이블 여유 (m). 기본 -0.065로 launch 기본(-0.05)보다 1.5cm 낮게 release. "
-                    "값을 낮추면 release 높이가 내려가고, 키우면 올라감",
+        None, ge=-0.05, le=0.30,
+        description="place 모드: 컵 바닥-테이블 여유 (m). 생략 시 launch 기본값(+0.05). "
+                    "값을 키우면 release 높이가 올라가 안전하지만 컵이 튕길 수 있음",
     )
     place_safe_z_min: Optional[float] = Field(
         None, ge=0.05, le=0.40,
