@@ -171,7 +171,7 @@ CUP_STACK_SETUP="$SCRIPT_DIR/../ros2-cup-stack/install/setup.bash"
 # (구 cup-stack-server/yarr-robust-speed-stack 아님) 그쪽 install 을 source 한다.
 RECODE_SETUP="$SCRIPT_DIR/../ros2-depth-point-cloude/install/setup.bash"
 tmux send-keys -t "$SESSION:cam-exo" \
-    "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=exo" Enter
+    "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=exo color_profile:=1280x720x15 depth_profile:=1280x720x15" Enter
 
 # ── 창: exo perception (depth_digital_twin) ───────────────
 # exo 카메라 영상(/exo/exo/*)을 받아 /digital_twin/boxes, /vision/cups_on_table
@@ -195,7 +195,7 @@ VISION_NODE_SETUP="$SCRIPT_DIR/../vision-node/install/setup.bash"
 tmux new-window -t "$SESSION" -n "verifier"
 # vision-exo 가 /digital_twin/boxes 를 내보낸 뒤 띄운다.
 tmux send-keys -t "$SESSION:verifier" \
-    "source $ROS_SETUP && source $VISION_NODE_SETUP && sleep 12 && ros2 launch cup_stacking_verify cup_verify.launch.py rviz:=$VISION_RVIZ tuner:=false use_test_pub:=false cp_z:=0.095" Enter
+    "source $ROS_SETUP && source $VISION_NODE_SETUP && sleep 12 && ros2 launch cup_stacking_verify cup_verify.launch.py rviz:=$VISION_RVIZ tuner:=false use_test_pub:=false cp_z:=0.095 cp_offset_x:=0.03 cp_offset_y:=-0.02" Enter
 
 # ── 창: hand-fusion (VISION_MODE=fusion_dual 일 때만) ──────
 # hand 카메라 producer + eye-in-hand 정적 TF(handeye, world<->base_link)를 띄워
@@ -211,7 +211,7 @@ fi
 if [[ "$WITH_HAND_CAM" == "true" ]]; then
     tmux new-window -t "$SESSION" -n "cam-hand"
     tmux send-keys -t "$SESSION:cam-hand" \
-        "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=hand" Enter
+        "source $ROS_SETUP && source $RECODE_SETUP && source $CUP_STACK_SETUP && ros2 launch recode_sequence cameras_only.launch.py view:=hand color_profile:=1280x720x15 depth_profile:=1280x720x15" Enter
 fi
 
 # ── 창 2: bringup 에이전트 (포트 8099) ────────────────────
