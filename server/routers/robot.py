@@ -29,8 +29,6 @@ from ..schemas import (
     RobotStatusResponse,
     ScanSkillResponse,
     ScanSquareSkillResponse,
-    StopAllRequest,
-    StopAllResponse,
     TaskLogResponse,
     TaskStartedResponse,
     TaskStartRequest,
@@ -121,20 +119,6 @@ async def stop_task(body: TaskStopRequest) -> dict:
         raise HTTPException(status_code=404, detail=str(e))
 
 
-@router.post("/stop", response_model=StopAllResponse)
-async def stop_all(body: StopAllRequest | None = None) -> dict:
-    """실행 중인 skill/task 를 즉시 멈추고 팔을 HOME 으로 복귀시킨다.
-
-    통합 정지(패닉/abort) 버튼용. 진행 중인 동기 skill(pyramid/unstack/…)은
-    skill_api_node 의 ``/stop`` 으로 인터럽트+HOME 하고, action task(fallen/
-    outlier/agent)는 프로세스를 kill 한다. ``task/stop`` 과 달리 정지할 대상
-    이름이 필요 없다 — 무엇이 돌고 있든 멈춘다.
-    """
-    domain = _get_domain()
-    home = True if body is None else body.home
-    return await domain.stop_all(home=home)
-
-
 @router.get("/task/log", response_model=TaskLogResponse)
 async def get_task_log(name: str = "", tail: int = 50) -> dict:
     if not name:
@@ -208,22 +192,20 @@ async def recover_safe_stop() -> dict:
 
 
 @router.post("/command", response_model=UserCommandResponse)
-async def run_agent(body: UserCommandRequest) -> dict:
-    """자연어 명령으로 cup_stack_agent LLM 루프를 실행한다.
+async def send_user_command(body: UserCommandRequest) -> dict:
+    """자연어 명령을 LLM 에이전트 루프로 전달한다.
 
+    원문 텍스트를 ``/user_command`` (``std_msgs/String``) 토픽으로 발행한다.
     프론트엔드 Command 박스에서 ``/`` 접두 없이 입력한 일반 텍스트가 여기로
-    들어온다 (``/`` 접두는 직접 로봇 명령용). 텍스트는 agent 의 ``start.sh
-    --real-api`` 를 로컬 서브프로세스로 띄우며 ``USER_COMMAND`` 로 전달된다.
+    들어온다 (``/`` 접두는 직접 로봇 명령용).
     """
     text = body.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="text must not be empty")
     domain = _get_domain()
     try:
-        return await domain.run_agent(text)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except (RuntimeError, OSError) as e:
+        return await domain.send_user_command(text)
+    except ConnectionError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
 

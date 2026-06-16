@@ -50,41 +50,6 @@ class TestRobotStatusEndpoint:
         assert "tasks" in data
 
 
-class TestUserCommandEndpoint:
-    def test_command_launches_agent_with_user_command(
-        self, client: TestClient, mock_launcher,
-    ):
-        mock_launcher.start.return_value = _make_running_task("cup_stack_agent")
-        resp = client.post("/api/robot/command", json={"text": "3단 쌓아줘"})
-        assert resp.status_code == 200
-        assert resp.json()["success"] is True
-
-        called_command, called_args = mock_launcher.start.call_args[0]
-        assert called_command == "cup_stack_agent"
-        assert called_args == {"user_command": "3단 쌓아줘"}
-
-    def test_command_strips_text_before_launch(
-        self, client: TestClient, mock_launcher,
-    ):
-        mock_launcher.start.return_value = _make_running_task("cup_stack_agent")
-        resp = client.post("/api/robot/command", json={"text": "  3단 쌓아줘  "})
-        assert resp.status_code == 200
-        _cmd, called_args = mock_launcher.start.call_args[0]
-        assert called_args == {"user_command": "3단 쌓아줘"}
-
-    def test_command_empty_text_returns_400(self, client: TestClient, mock_launcher):
-        resp = client.post("/api/robot/command", json={"text": "   "})
-        assert resp.status_code == 400
-        mock_launcher.start.assert_not_called()
-
-    def test_command_missing_script_returns_500(
-        self, client: TestClient, mock_launcher,
-    ):
-        mock_launcher.start.side_effect = FileNotFoundError("start.sh not found")
-        resp = client.post("/api/robot/command", json={"text": "3단 쌓아줘"})
-        assert resp.status_code == 500
-
-
 class TestPyramidConfigEndpoint:
     def test_get_pyramid_config_uses_configured_home_xy(
         self,
@@ -347,7 +312,6 @@ class TestFallenCupEndpoints:
         assert called_command == "fallen_cup_recovery"
         assert called_args == {
             "mode": "place", "multi_cup": "true", "dry_run": "false", "sim": "true",
-            "stand_cup_margin_m": "-0.065",
             "place_cup_tilt_deg": "8.0",
             "place_plus_y_cup_tilt_deg": "8.0",
         }
@@ -356,37 +320,28 @@ class TestFallenCupEndpoints:
         resp = client.post("/api/robot/fallen-cup/recovery", json={"mode": "throw"})
         assert resp.status_code == 422
 
-    def test_recovery_place_params_forwarded(self, client: TestClient, mock_launcher):
-        """place 모드 파라미터가 launch 인자로 전달되는지."""
+    def test_recovery_z_safety_params_forwarded(self, client: TestClient, mock_launcher):
+        """그리퍼-바닥 충돌 방지용 Z 안전 파라미터가 launch 인자로 전달되는지."""
         mock_launcher.start.return_value = _make_running_task("fallen_cup_recovery")
         resp = client.post(
             "/api/robot/fallen-cup/recovery",
-            json={
-                "mode": "place",
-                "stand_cup_margin_m": 0.10,
-                "place_safe_z_min": 0.20,
-                "place_cup_tilt_deg": 15.0,
-                "place_plus_y_cup_tilt_deg": 15.0,
-            },
+            json={"mode": "place", "stand_cup_margin_m": 0.10, "place_safe_z_min": 0.20},
         )
         assert resp.status_code == 200
         _, called_args = mock_launcher.start.call_args[0]
         assert called_args["stand_cup_margin_m"] == "0.1"
         assert called_args["place_safe_z_min"] == "0.2"
-        assert called_args["place_cup_tilt_deg"] == "15.0"
-        assert called_args["place_plus_y_cup_tilt_deg"] == "15.0"
 
-    def test_recovery_default_place_params_are_server_side(
+    def test_recovery_z_safety_params_omitted_uses_launch_defaults(
         self, client: TestClient, mock_launcher,
     ):
         mock_launcher.start.return_value = _make_running_task("fallen_cup_recovery")
         resp = client.post("/api/robot/fallen-cup/recovery", json={"mode": "place"})
         assert resp.status_code == 200
         _, called_args = mock_launcher.start.call_args[0]
-        assert called_args["stand_cup_margin_m"] == "-0.065"
+        # 생략 시 launch 기본값 사용 → args에 포함하지 않음
+        assert "stand_cup_margin_m" not in called_args
         assert "place_safe_z_min" not in called_args
-        assert called_args["place_cup_tilt_deg"] == "8.0"
-        assert called_args["place_plus_y_cup_tilt_deg"] == "8.0"
 
     def test_recovery_conflict_returns_409(self, client: TestClient, mock_launcher):
         mock_launcher.start.side_effect = RuntimeError("Task 'x' is already running")
@@ -604,110 +559,3 @@ class TestSkillSafetyStopRecovery:
             asyncio.run(robot_domain._run_skill_call(boom))
         assert "safety stop cleared" not in str(ei.value)
         assert "422" in str(ei.value)
-
-
-class TestStopAllEndpoint:
-    def test_stop_all_interrupts_and_homes(
-        self, client: TestClient, robot_domain: RobotDomain, mock_launcher,
-    ):
-        # 진행 중인 동기 skill 케이스: action task 없음, skill_api /stop 가
-        # 인터럽트+HOME 을 보고.
-        mock_launcher.active_action_task = None
-        robot_domain._skill_api_stop = AsyncMock(return_value={
-            "success": True, "interrupted": True, "homed": True,
-            "detail": "interrupted + homed",
-        })
-        resp = client.post("/api/robot/stop", json={})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is True
-        assert data["interrupted"] is True
-        assert data["homed"] is True
-        assert data["killed_tasks"] == []
-        robot_domain._skill_api_stop.assert_awaited_once_with(home=True)
-        # DRCF 퀵스탑은 올바른 서비스/타입으로 나가야 한다.
-        call = robot_domain._bridge.call_service.await_args_list[0]
-        assert call.args[0] == "/dsr01/motion/move_stop"
-        assert call.args[1] == "dsr_msgs2/srv/MoveStop"
-
-    def test_stop_all_kills_active_action_task(
-        self, client: TestClient, robot_domain: RobotDomain, mock_launcher,
-    ):
-        # action task 인터럽트 케이스: 프로세스 kill, skill_api 는 down(None).
-        mock_launcher.active_action_task = _make_running_task("fallen_cup_recovery")
-        robot_domain._skill_api_stop = AsyncMock(return_value=None)
-        resp = client.post("/api/robot/stop", json={})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["killed_tasks"] == ["fallen_cup_recovery"]
-        assert data["homed"] is False
-        mock_launcher.stop.assert_awaited_with("fallen_cup_recovery")
-        assert "skill_api down" in data["detail"]
-
-    def test_stop_all_kills_agent_loop(
-        self, client: TestClient, robot_domain: RobotDomain, mock_launcher,
-    ):
-        # agent 가 돌면 active_action_task 엔 안 잡히지만(설계상 제외) skill 을
-        # 계속 POST 하므로 stop 이 agent 루프도 죽여야 한다.
-        mock_launcher.active_action_task = None
-        mock_launcher.list_tasks = MagicMock(return_value=[
-            {"name": "cup_stack_agent", "command": "cup_stack_agent",
-             "status": "running", "pid": 999},
-        ])
-        robot_domain._skill_api_stop = AsyncMock(return_value={
-            "success": True, "interrupted": True, "homed": True, "detail": "ok",
-        })
-        resp = client.post("/api/robot/stop", json={})
-        assert resp.status_code == 200
-        assert resp.json()["killed_tasks"] == ["cup_stack_agent"]
-        mock_launcher.stop.assert_awaited_with("cup_stack_agent")
-
-    def test_stop_all_home_false_forwarded(
-        self, client: TestClient, robot_domain: RobotDomain, mock_launcher,
-    ):
-        mock_launcher.active_action_task = None
-        robot_domain._skill_api_stop = AsyncMock(return_value={
-            "success": True, "interrupted": True, "homed": False,
-            "detail": "interrupted; HOME skipped (home=false)",
-        })
-        resp = client.post("/api/robot/stop", json={"home": False})
-        assert resp.status_code == 200
-        robot_domain._skill_api_stop.assert_awaited_once_with(home=False)
-
-    def test_stop_all_empty_body_defaults_home_true(
-        self, client: TestClient, robot_domain: RobotDomain, mock_launcher,
-    ):
-        # 본문 없이 POST 해도 (Abort 버튼) 동작하고 home 기본 True.
-        mock_launcher.active_action_task = None
-        robot_domain._skill_api_stop = AsyncMock(return_value={
-            "success": True, "interrupted": True, "homed": True, "detail": "ok",
-        })
-        resp = client.post("/api/robot/stop")
-        assert resp.status_code == 200
-        robot_domain._skill_api_stop.assert_awaited_once_with(home=True)
-
-
-class TestUnstackAllStopRequested:
-    def test_unstack_all_bails_when_stop_requested(
-        self, client: TestClient, robot_domain: RobotDomain,
-    ):
-        # stop_all() 이 _stop_requested 를 세운 뒤 시작된 게 아니라,
-        # 루프 중간에 세팅되는 상황을 모사: 첫 스텝 후 stop 요청.
-        robot_domain._ensure_skill_api = AsyncMock()
-
-        calls = {"n": 0}
-
-        async def _step(payload):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                robot_domain._stop_requested = True
-            return {"success": True, "skill": "pyramid", "detail": ""}
-
-        robot_domain._post_pyramid_step = AsyncMock(side_effect=_step)
-        resp = client.post("/api/robot/skill/unstack_all", json={"x": 0.4, "y": 0.1})
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["success"] is False
-        assert data["completed"] == 1          # 첫 컵만 해체 후 중단
-        assert "정지 요청" in data["detail"]
-        assert calls["n"] == 1                  # 두 번째 pick 은 안 나감

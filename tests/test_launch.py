@@ -1,11 +1,8 @@
 """Tests for launch manager task classification."""
 
 from server.ros.launch import (
-    AGENT_COMMAND,
-    AGENT_COMMANDS,
     ALL_COMMANDS,
     BRINGUP_COMMANDS,
-    NON_ACTION_COMMANDS,
     SERVICE_COMMANDS,
     TASK_COMMANDS,
 )
@@ -28,22 +25,8 @@ def test_task_commands():
 
 
 def test_all_commands_union():
-    assert ALL_COMMANDS == (
-        BRINGUP_COMMANDS | TASK_COMMANDS | SERVICE_COMMANDS | AGENT_COMMANDS
-    )
+    assert ALL_COMMANDS == BRINGUP_COMMANDS | TASK_COMMANDS | SERVICE_COMMANDS
 
 
 def test_bringup_commands():
     assert BRINGUP_COMMANDS == {"bringup_sim", "bringup_real"}
-
-
-def test_agent_command():
-    assert AGENT_COMMAND == "cup_stack_agent"
-    assert AGENT_COMMANDS == {"cup_stack_agent"}
-
-
-def test_agent_is_not_an_action_task():
-    # The agent drives action tasks itself, so it must be excluded from the
-    # single-action-task gate (alongside long-lived services).
-    assert AGENT_COMMAND in NON_ACTION_COMMANDS
-    assert NON_ACTION_COMMANDS == SERVICE_COMMANDS | AGENT_COMMANDS

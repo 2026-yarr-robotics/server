@@ -18,7 +18,7 @@ import numpy as np
 
 from ..config import RobotHome, WorkspaceLimits
 from ..ros.bridge import RosBridge
-from ..ros.launch import AGENT_COMMAND, BRINGUP_COMMANDS, LaunchManager, TaskStatus
+from ..ros.launch import BRINGUP_COMMANDS, LaunchManager, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -178,9 +178,6 @@ class RobotDomain:
         self._launcher = launcher
         self._skill_api_url = skill_api_url.rstrip("/")
         self._skill_api_lock = asyncio.Lock()
-        # Set by stop_all() to make in-flight server-side multi-step loops
-        # (unstack_all_skill) bail between steps; reset when such a loop starts.
-        self._stop_requested = False
         self._status = RobotStatus()
         self._joint_topic = joint_states_topic
         self._subscribed = False
@@ -371,103 +368,6 @@ class RobotDomain:
         await self._launcher.stop(name)
         return {"name": name, "status": "stopped", "ros_stop_success": ros_stop_success}
 
-    async def stop_all(self, home: bool = True) -> dict[str, Any]:
-        """실행 중인 무엇이든 즉시 멈추고 팔을 HOME 으로 복귀시킨다.
-
-        통합 정지(패닉/abort) 진입점:
-
-        1. 서버측 다단계 루프(:meth:`unstack_all_skill`)가 다음 스텝 전에
-           빠져나오도록 ``_stop_requested`` 를 세운다.
-        2. DRCF ``MoveStop`` 퀵스탑을 보내 물리적으로 즉시 정지한다.
-        3. 실행 중인 action task 프로세스(fallen/outlier/agent)가 있으면 kill.
-           (프로세스 사망 = 그 안의 MoveItPy servoj 스트리밍도 끊김.)
-        4. skill_api_node 의 ``POST /stop`` 을 호출해 진행 중인 skill 을
-           인터럽트하고 충돌 회피 HOME 복귀까지 시킨다. skill_api 가 떠 있지
-           않으면(=action task 인터럽트 케이스) HOME 은 생략됨으로 보고한다.
-
-        skill 의 모션은 상시 노드인 skill_api_node 안에서 MoveItPy 로
-        스트리밍되므로 서버 퀵스탑만으로는 신뢰성 있게 끊기지 않는다 —
-        실제 인터럽트는 (4)의 skill_api ``/stop`` 이 담당한다.
-        """
-        self._stop_requested = True
-        ros_stop = await self._stop_motion()
-
-        # Kill every process that would keep driving motion past the interrupt:
-        #   - an active action task (fallen/outlier recovery), and
-        #   - the agent LLM loop. The agent is excluded from active_action_task
-        #     by design, but it keeps POSTing skills, so it must be stopped too
-        #     or it re-issues motion right after the interrupt.
-        running = {
-            t["name"] for t in self._launcher.list_tasks()
-            if t.get("status") == "running"
-        }
-        to_kill: list[str] = []
-        active = self._launcher.active_action_task
-        if active is not None:
-            to_kill.append(active.name)
-        if AGENT_COMMAND in running and AGENT_COMMAND not in to_kill:
-            to_kill.append(AGENT_COMMAND)
-
-        killed: list[str] = []
-        for name in to_kill:
-            try:
-                await self._launcher.stop(name)
-                killed.append(name)
-            except Exception as exc:
-                logger.warning("stop_all: task '%s' stop failed: %s", name, exc)
-
-        skill_stop = await self._skill_api_stop(home=home)
-        homed = bool(skill_stop.get("homed")) if skill_stop else False
-        interrupted = (
-            bool(skill_stop.get("interrupted")) if skill_stop else ros_stop
-        )
-
-        parts: list[str] = []
-        if killed:
-            parts.append("killed " + ", ".join(killed))
-        if skill_stop:
-            parts.append(skill_stop.get("detail") or "skill interrupted")
-        elif killed:
-            parts.append("skill_api down; HOME skipped")
-        else:
-            parts.append("nothing running; quick-stop sent")
-
-        return {
-            "success": True,
-            "ros_stop": ros_stop,
-            "interrupted": interrupted,
-            "killed_tasks": killed,
-            "homed": homed,
-            "detail": "; ".join(parts),
-        }
-
-    async def _skill_api_stop(self, home: bool = True) -> dict[str, Any] | None:
-        """skill_api_node 의 ``POST /stop`` 을 호출 (인터럽트 + HOME 복귀).
-
-        skill_api JSON 응답을 반환하고, skill_api 가 안 떠 있으면(=action task
-        인터럽트 케이스로 skill_api 가 정지된 상태) ``None`` 을 반환한다. HOME
-        이동이 ~10–20s 걸릴 수 있어 넉넉한 타임아웃을 둔다.
-        """
-        url = (
-            f"{self._skill_api_url}/stop"
-            f"?home={'true' if home else 'false'}"
-        )
-        req = urllib.request.Request(url, data=b"", method="POST")
-        loop = asyncio.get_running_loop()
-
-        def _call() -> dict[str, Any] | None:
-            try:
-                with urllib.request.urlopen(req, timeout=60) as resp:
-                    return json.loads(resp.read())
-            except urllib.error.URLError as exc:
-                logger.info("skill_api /stop unreachable: %s", exc)
-                return None
-            except Exception as exc:  # noqa: BLE001 - stop must not raise
-                logger.warning("skill_api /stop error: %s", exc)
-                return None
-
-        return await loop.run_in_executor(None, _call)
-
     async def start_fallen_cup_recovery(
         self,
         mode: str = "drop",
@@ -539,28 +439,19 @@ class RobotDomain:
         return await self.start_task("outlier_cup_recovery", args)
 
     async def _stop_motion(self) -> bool:
-        """Best-effort: Doosan 컨트롤러에 퀵스탑(MoveStop) 명령을 보낸다.
-
-        dsr_controller2 가 advertise 하는 실제 서비스는
-        ``/dsr01/motion/move_stop`` (``dsr_msgs2/srv/MoveStop``)다. ``stop_mode``
-        ``1`` = DR_QSTOP(quick stop, category 2). 이전에는 존재하지 않는
-        ``/motion/stop_motion`` + ``StopMotion`` 타입을 호출해 항상 조용히
-        실패했었다.
-        """
+        """Best-effort: Doosan 컨트롤러에 퀵스탑 명령을 보낸다."""
         if not self._bridge.connected:
             return False
         try:
-            res = await self._bridge.call_service(
-                "/dsr01/motion/move_stop",
-                "dsr_msgs2/srv/MoveStop",
+            await self._bridge.call_service(
+                "/motion/stop_motion",
+                "dsr_msgs2/srv/StopMotion",
                 {"stop_mode": 1},
                 timeout=2.0,
             )
-            if isinstance(res, dict) and "success" in res:
-                return bool(res["success"])
             return True
         except Exception as exc:
-            logger.warning("move_stop service call failed: %s", exc)
+            logger.warning("stop_motion service call failed: %s", exc)
             return False
 
     async def _get_robot_state(self) -> int | None:
@@ -753,16 +644,21 @@ class RobotDomain:
         )
         return result if result else {"success": False, "message": "Service call failed"}
 
-    async def run_agent(self, text: str) -> dict[str, Any]:
-        """Run the cup_stack_agent LLM loop for a natural-language command.
+    async def send_user_command(self, text: str) -> dict[str, Any]:
+        """Forward a natural-language command to the LLM agent loop.
 
-        A user command (e.g. "3단 쌓아줘") launches the agent's own
-        ``start.sh --real-api`` as a local subprocess, passing the text via the
-        ``USER_COMMAND`` env var (start.sh forwards it as the aggregator node's
-        ``user_command`` ROS parameter). Re-sending a command restarts the loop.
+        Publishes the raw text on ``/user_command`` (``std_msgs/msg/String``),
+        the single world-state input perception cannot supply. The
+        goal_state_publisher → llm_node planner consumes it.
         """
-        await self._launcher.start(AGENT_COMMAND, {"user_command": text})
-        return {"success": True, "message": f"agent started: {text}"}
+        if not self._bridge.connected:
+            raise ConnectionError("rosbridge not connected")
+        self._bridge.publish(
+            "/user_command",
+            "std_msgs/msg/String",
+            {"data": text},
+        )
+        return {"success": True, "message": f"user command published: {text}"}
 
     async def get_log(self, name: str, tail: int = 50) -> list[str]:
         return await self._launcher.get_log(name, tail)
@@ -1434,32 +1330,12 @@ class RobotDomain:
         """
         steps: list[dict[str, Any]] = []
         total = len(UNSTACK_SEQUENCE)
-        # Fresh run: clear any stop left set by a previous stop_all() so this
-        # teardown is not aborted before it starts.
-        self._stop_requested = False
         logger.info(
             "unstack_all_skill start: %d cups -> nest (x=%.3f, y=%.3f)",
             total, x, y,
         )
 
         for index, slot in enumerate(UNSTACK_SEQUENCE, start=1):
-            # Honour a stop_all() between cups: the per-step skill_api /stop has
-            # already interrupted+homed the in-flight cup, so just bail with a
-            # partial result instead of issuing the next pick.
-            if self._stop_requested:
-                detail = (
-                    f"정지 요청 — {index - 1}/{total} 컵 해체 후 중단"
-                )
-                logger.warning("unstack_all_skill stopped: %s", detail)
-                return {
-                    "success": False,
-                    "skill": "unstack_all",
-                    "dest": {"x": float(x), "y": float(y)},
-                    "total": total,
-                    "completed": index - 1,
-                    "detail": detail,
-                    "steps": steps,
-                }
             nested = index  # destination column height: 1st cup=1 … 6th cup=6
             # Return to HOME only after the final cup — intermediate cups keep
             # the wrist at the grip yaw and stay low, so the whole teardown
