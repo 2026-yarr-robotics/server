@@ -183,6 +183,20 @@ class StopAllResponse(BaseModel):
     })
 
 
+class HomeResponse(BaseModel):
+    """팔을 조인트 HOME 으로 복귀시킨 결과 (인터럽트 없는 단순 HOME)."""
+
+    success: bool
+    homed: bool = False               # HOME 복귀 완료 여부
+    detail: str = ""
+
+    model_config = _example({
+        "success": True,
+        "homed": True,
+        "detail": "homed",
+    })
+
+
 class TaskLogResponse(BaseModel):
     name: str
     log: list[str]
@@ -290,6 +304,24 @@ class FallenCupDetectionStartRequest(BaseModel):
     )
 
     model_config = _example({"conf": 0.70, "imgsz": 1280, "use_depth": True})
+
+
+class MouthUpCupDetectionStartRequest(BaseModel):
+    """Body for POST /api/robot/mouth-up-cup/detection/start.
+
+    생략한 필드는 서버 설정(MouthUpCupConfig) 기본값을 사용한다.
+    """
+
+    conf: Optional[float] = Field(None, ge=0.0, le=1.0, description="YOLO confidence threshold")
+    imgsz: Optional[int] = Field(None, ge=64, description="YOLO 입력 크기")
+    target_class_name: Optional[str] = Field(
+        None, description="검출할 YOLO 클래스 (기본 'mouth-up-cup')"
+    )
+    weights_path: Optional[str] = Field(
+        None, description="YOLO weights(.pt) 절대경로. 생략 시 서버 설정/launch 기본값"
+    )
+
+    model_config = _example({"conf": 0.25, "imgsz": 1280})
 
 
 class FallenCupRecoveryRequest(BaseModel):
@@ -443,6 +475,37 @@ class FallenCupStateResponse(BaseModel):
             "position": {"x": 0.012, "y": -0.034, "z": 0.41},
         }],
         "pose2d": None,
+        "grasp_pose": None,
+    })
+
+
+class MouthUpCupGraspPose(BaseModel):
+    """3D grasp 좌표 (/mouth_up_cup/grasp_pose, 카메라 optical frame)."""
+
+    frame_id: str
+    position: EEPositionSchema
+    orientation: dict = Field(..., description="quaternion {x, y, z, w}")
+
+    model_config = _example({
+        "frame_id": "camera_color_optical_frame",
+        "position": {"x": 0.012, "y": -0.034, "z": 0.41},
+        "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0},
+    })
+
+
+class MouthUpCupStateResponse(BaseModel):
+    """GET /api/robot/mouth-up-cup/state 응답.
+
+    인식 데이터는 2초 이상 갱신이 없으면 stale로 간주되어 null로 내려간다.
+    """
+
+    detection_running: bool = Field(..., description="mouth_up_cup_detect 서비스 실행 여부")
+    detected: bool = Field(..., description="최근(2초 내) mouth-up grasp 좌표 수신 여부")
+    grasp_pose: Optional[MouthUpCupGraspPose] = Field(None, description="mouth-up 3D grasp 좌표")
+
+    model_config = _example({
+        "detection_running": True,
+        "detected": False,
         "grasp_pose": None,
     })
 

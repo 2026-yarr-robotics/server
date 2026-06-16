@@ -18,13 +18,18 @@ from ..config import WorkspaceConfig
 logger = logging.getLogger(__name__)
 
 BRINGUP_COMMANDS = {"bringup_sim", "bringup_real"}
-SERVICE_COMMANDS = {"gripper", "skill_api", "fallen_cup_detect"}
+SERVICE_COMMANDS = {
+    "gripper", "skill_api", "fallen_cup_detect", "mouth_up_cup_detect",
+}
 # gripper: Modbus-only, no MoveItPy conflict.
 # skill_api: long-lived pick / pyramid server, lazily started by
 #   RobotDomain.pick_skill / pyramid_skill.
 # fallen_cup_detect: long-lived YOLO fallen-cup detection
 #   (cup_stack/fallen_cup_detect.launch.py wraps speed_stack_yolo_seg).
 #   Pure perception, no MoveItPy conflict.
+# mouth_up_cup_detect: long-lived YOLO mouth-up-cup detection
+#   (cup_stack/mouth_up_cup_detect.launch.py wraps speed_stack_yolo_seg).
+#   Eye-in-hand (/hand) camera, same as fallen_cup_detect. Pure perception.
 
 # Substrings that make a log line too noisy to show in the dashboard feed
 _LOG_NOISE = frozenset([

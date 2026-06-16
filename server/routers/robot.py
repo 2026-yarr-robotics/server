@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 
 from ..domains.fallen_cup import FallenCupDomain
+from ..domains.mouth_up_cup import MouthUpCupDomain
 from ..domains.robot import RobotDomain
 from ..ros.launch import ALL_COMMANDS
 from ..schemas import (
@@ -15,6 +16,8 @@ from ..schemas import (
     FallenCupStateResponse,
     GripperRequest,
     GripperResponse,
+    MouthUpCupDetectionStartRequest,
+    MouthUpCupStateResponse,
     MoveRequest,
     MoveResponse,
     OutlierCupRecoveryRequest,
@@ -29,6 +32,7 @@ from ..schemas import (
     RobotStatusResponse,
     ScanSkillResponse,
     ScanSquareSkillResponse,
+    HomeResponse,
     StopAllRequest,
     StopAllResponse,
     TaskLogResponse,
@@ -49,6 +53,7 @@ router = APIRouter(prefix="/api/robot", tags=["robot"])
 
 robot_domain: RobotDomain | None = None
 fallen_cup_domain: FallenCupDomain | None = None
+mouth_up_cup_domain: MouthUpCupDomain | None = None
 
 
 def set_robot_domain(domain: RobotDomain) -> None:
@@ -61,6 +66,11 @@ def set_fallen_cup_domain(domain: FallenCupDomain) -> None:
     fallen_cup_domain = domain
 
 
+def set_mouth_up_cup_domain(domain: MouthUpCupDomain) -> None:
+    global mouth_up_cup_domain
+    mouth_up_cup_domain = domain
+
+
 def _get_domain() -> RobotDomain:
     if robot_domain is None:
         raise HTTPException(status_code=503, detail="Robot domain not initialized")
@@ -71,6 +81,12 @@ def _get_fallen_cup_domain() -> FallenCupDomain:
     if fallen_cup_domain is None:
         raise HTTPException(status_code=503, detail="Fallen cup domain not initialized")
     return fallen_cup_domain
+
+
+def _get_mouth_up_cup_domain() -> MouthUpCupDomain:
+    if mouth_up_cup_domain is None:
+        raise HTTPException(status_code=503, detail="Mouth-up cup domain not initialized")
+    return mouth_up_cup_domain
 
 
 @router.get("/status", response_model=RobotStatusResponse)
@@ -133,6 +149,18 @@ async def stop_all(body: StopAllRequest | None = None) -> dict:
     domain = _get_domain()
     home = True if body is None else body.home
     return await domain.stop_all(home=home)
+
+
+@router.post("/home", response_model=HomeResponse)
+async def move_home() -> dict:
+    """팔을 조인트 HOME 으로 복귀시킨다 — place 후 가는 그 관절 HOME.
+
+    ``/stop`` 과 달리 진행 중 skill 인터럽트가 없는 **단순 HOME 이동**이다.
+    skill 이 돌고 있으면 skill_api 가 거부한다(그 경우 ``/stop`` 을 쓸 것).
+    에이전트의 pick 실패 복귀(컵 안 든 pre-grasp 상태)에서 호출한다.
+    """
+    domain = _get_domain()
+    return await domain.move_home()
 
 
 @router.get("/task/log", response_model=TaskLogResponse)
@@ -455,6 +483,41 @@ async def start_fallen_cup_recovery(body: FallenCupRecoveryRequest) -> dict:
         )
     except RuntimeError as e:
         raise HTTPException(status_code=409, detail=str(e))
+
+
+# ── Mouth-up Cup ──────────────────────────────────────────────────────────────
+
+@router.post("/mouth-up-cup/detection/start", response_model=TaskStartedResponse)
+async def start_mouth_up_cup_detection(body: MouthUpCupDetectionStartRequest) -> dict:
+    """입구가 위를 향한 컵 YOLO 인식 노드(mouth_up_cup_detect)를 시작한다.
+
+    장기 실행 서비스(SERVICE_COMMAND)라 다른 액션 태스크와 병행 가능.
+    fallen_cup_detect 와 동일하게 eye-in-hand(/hand) 카메라 토픽을 사용한다.
+    """
+    domain = _get_mouth_up_cup_domain()
+    args = domain.build_detection_args(
+        conf=body.conf,
+        imgsz=body.imgsz,
+        target_class_name=body.target_class_name,
+        weights_path=body.weights_path,
+    )
+    try:
+        return await domain.start_detection(args)
+    except RuntimeError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@router.post("/mouth-up-cup/detection/stop", response_model=TaskStoppedResponse)
+async def stop_mouth_up_cup_detection() -> dict:
+    """입구가 위를 향한 컵 인식 노드를 중지한다 (로봇 모션 정지 없음)."""
+    domain = _get_mouth_up_cup_domain()
+    return await domain.stop_detection()
+
+
+@router.get("/mouth-up-cup/state", response_model=MouthUpCupStateResponse)
+async def get_mouth_up_cup_state() -> dict:
+    """인식 노드 실행 여부 + 최근 grasp 좌표(2초 내 갱신분)를 반환한다."""
+    return _get_mouth_up_cup_domain().get_state()
 
 
 # ── Outlier Cup ───────────────────────────────────────────────────────────────

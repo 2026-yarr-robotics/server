@@ -468,6 +468,49 @@ class RobotDomain:
 
         return await loop.run_in_executor(None, _call)
 
+    async def move_home(self) -> dict[str, Any]:
+        """팔을 조인트 HOME 으로 복귀시킨다 (인터럽트 없는 단순 HOME).
+
+        skill_api_node 의 ``POST /home`` 을 호출 — place 후 매번 쓰는 것과 같은
+        ``try_move_home``. ``/stop`` 과 달리 진행 중 skill 인터럽트나 퀵스탑이
+        없고, skill 이 돌고 있으면 skill_api 가 거부한다. 에이전트의 pick 실패
+        HOME 복귀용(돌고 있는 skill 없음·컵 안 든 상태)이다.
+        """
+        res = await self._skill_api_home()
+        if res is None:
+            return {
+                "success": False, "homed": False,
+                "detail": "skill_api unreachable; HOME skipped",
+            }
+        return {
+            "success": bool(res.get("success")),
+            "homed": bool(res.get("homed")),
+            "detail": res.get("detail") or "",
+        }
+
+    async def _skill_api_home(self) -> dict[str, Any] | None:
+        """skill_api_node 의 ``POST /home`` 호출 (인터럽트 없는 단순 HOME).
+
+        skill_api JSON 응답을 반환하고, skill_api 가 안 떠 있으면 ``None`` 을
+        반환한다. HOME 이동이 ~10–20s 걸릴 수 있어 넉넉한 타임아웃을 둔다.
+        """
+        url = f"{self._skill_api_url}/home"
+        req = urllib.request.Request(url, data=b"", method="POST")
+        loop = asyncio.get_running_loop()
+
+        def _call() -> dict[str, Any] | None:
+            try:
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    return json.loads(resp.read())
+            except urllib.error.URLError as exc:
+                logger.info("skill_api /home unreachable: %s", exc)
+                return None
+            except Exception as exc:  # noqa: BLE001 - home must not raise
+                logger.warning("skill_api /home error: %s", exc)
+                return None
+
+        return await loop.run_in_executor(None, _call)
+
     async def start_fallen_cup_recovery(
         self,
         mode: str = "drop",

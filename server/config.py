@@ -187,6 +187,34 @@ class FallenCupTopics:
 
 
 @dataclass(frozen=True)
+class MouthUpCupConfig:
+    """Mouth-up-cup detection (YOLO) launch defaults.
+
+    Counterpart of :class:`FallenCupConfig`. Same trained weights
+    (speed_stack_yolo_seg share ``weights/best.pt`` — empty string falls back
+    to the launch default). Override weights via the ``MOUTH_UP_CUP_WEIGHTS``
+    env var on the robot service. conf is more permissive than fallen because
+    the mouth-up class is rarer in frame; tune per deployment.
+    """
+
+    weights_path: str = ""
+    # 0.25 → 0.6: 낮은 임계가 멀쩡한 upright 컵을 mouth-up-cup 으로 오탐해
+    # recovery 2단계가 정상 컵을 뒤집는 문제를 억제한다 (fallen 은 이미 0.70).
+    conf: float = 0.6
+    imgsz: int = 1280
+    target_class_name: str = "mouth-up-cup"
+    # See FallenCupConfig.device — "cuda" avoids the INTEGER-parse type clash.
+    device: str = "cuda"
+
+
+@dataclass(frozen=True)
+class MouthUpCupTopics:
+    """Topics published by the mouth-up-cup detection node."""
+
+    grasp_pose: str = "/mouth_up_cup/grasp_pose"
+
+
+@dataclass(frozen=True)
 class ServicePorts:
     robot: int = 8001
     handineye: int = 8002
@@ -207,3 +235,6 @@ class AppSettings:
     workspace_limits: WorkspaceLimits = field(default_factory=WorkspaceLimits)
     fallen_cup: FallenCupConfig = field(default_factory=FallenCupConfig)
     fallen_cup_topics: FallenCupTopics = field(default_factory=FallenCupTopics)
+    mouth_up_cup: MouthUpCupConfig = field(default_factory=MouthUpCupConfig)
+    mouth_up_cup_topics: MouthUpCupTopics = field(
+        default_factory=MouthUpCupTopics)
