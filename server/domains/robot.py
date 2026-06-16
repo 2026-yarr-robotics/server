@@ -44,6 +44,10 @@ PYRAMID_LAYER_HEIGHT = 0.093
 PYRAMID_PLACE_Z_BASE = 0.318
 DEFAULT_PYRAMID_DEGREE = 90.0
 DEFAULT_PYRAMID_PICK_Z = 0.313  # SkillStackConfig.pick_z_base
+# Unstack DROP height (table destination nest). Releasing at the table pick_z
+# (0.313) was too low — the removed cup nearly hit the table on release. Drop a
+# bit above the L1 place height so it releases with clearance.
+UNSTACK_DROP_Z_BASE = 0.323
 # Per-cup nest increment (m) for the unstack destination column. 12.7 mm is the
 # working cup geometry used by every launch invocation and the interactive
 # cup_{pyramid,unstack}_select nodes (`nest_inc:=0.0127`); the 0.012 fallback
@@ -114,11 +118,18 @@ _ROBOT_STATE_RUNNING = frozenset({
     ROBOT_STATE_INITIALIZING, ROBOT_STATE_STANDBY,
     ROBOT_STATE_MOVING, ROBOT_STATE_HOMMING,
 })
-# set_robot_control command per SW-recoverable safety state
-# (dsr_msgs2/srv/SetRobotControl): 2=RESET_SAFET_STOP, 3=RESET_SAFET_OFF.
+# set_robot_control command per recoverable safety state (dsr_msgs2/srv/
+# SetRobotControl): 2=RESET_SAFET_STOP, 3=RESET_SAFET_OFF(=SERVO_ON),
+# 4=RECOVERY_SAFE_STOP, 5=RECOVERY_SAFE_OFF. SAFE_STOP2/SAFE_OFF2 are the
+# collision-class ("someone bumped it" / safety-violation) states; we attempt
+# the RECOVERY_* clear — the same command the driver's OnMonitoringStateCB
+# issues — so a bump auto-recovers. A real sustained collision may still need a
+# manual back-drive; then the STANDBY poll just times out (recovered=False).
 _RECOVER_CONTROL = {
     ROBOT_STATE_SAFE_STOP: 2,
     ROBOT_STATE_SAFE_OFF: 3,
+    ROBOT_STATE_SAFE_STOP2: 4,
+    ROBOT_STATE_SAFE_OFF2: 5,
 }
 ROBOT_MODE_AUTONOMOUS = 1        # dsr_msgs2/srv/SetRobotMode
 RECOVER_POLL_S = 0.2
@@ -631,16 +642,18 @@ class RobotDomain:
         """Clear a Doosan safety stop (the accel/vel-limit "yellow light")
         in place, without restarting bringup.
 
-        Diagnoses ``robot_state`` and, for the SW-recoverable safety states
-        (SAFE_STOP / SAFE_OFF), issues ``set_robot_control`` to return to
-        STANDBY, then ``set_robot_mode`` AUTONOMOUS, polling until STANDBY.
-        The arm holds its pose and the OnRobot gripper (separate Modbus link)
-        holds its grip across the reset, so the caller can resume the
-        interrupted motion in place.
+        Diagnoses ``robot_state`` and, for the recoverable safety states,
+        issues ``set_robot_control`` then ``set_robot_mode`` AUTONOMOUS, polling
+        until STANDBY. SAFE_STOP / SAFE_OFF use the RESET command; the
+        collision-class SAFE_STOP2 / SAFE_OFF2 (e.g. a human bump) use the
+        RECOVERY command. The arm holds its pose and the OnRobot gripper
+        (separate Modbus link) holds its grip across the reset, so the caller
+        can resume the interrupted motion in place.
 
-        Not auto-cleared (caller must escalate to a bringup restart / human):
-        EMERGENCY_STOP (red, physical button) and the collision-class
-        SAFE_STOP2 / SAFE_OFF2 / RECOVERY states.
+        Not auto-cleared: EMERGENCY_STOP (red, physical button — human releases
+        it) and the intermediate RECOVERY state. A SAFE_STOP2/SAFE_OFF2 from a
+        sustained collision may also fail to reach STANDBY (a manual back-drive
+        is needed); recovered=False is returned honestly in that case.
 
         Returns ``{recovered, from_state, from_state_name, to_state,
         to_state_name, detail}``. ``recovered`` is True when the robot is at
@@ -1373,7 +1386,7 @@ class RobotDomain:
         added (1 = first/bottom cup).  The release Z grows with the
         column so each cup nests on top of the previous one::
 
-            place_z = pyramid_pick_z + (nested - 1) * DEFAULT_NEST_INC
+            place_z = UNSTACK_DROP_Z_BASE + (nested - 1) * DEFAULT_NEST_INC
 
         Unstacking must proceed top-down (3m → 2r/2l → 1r/1m/1l); the
         caller is responsible for that ordering.
@@ -1405,7 +1418,7 @@ class RobotDomain:
         self._ensure_pyramid_center()
         pick = self._pyramid_slots[slot]
 
-        place_z = self._pyramid_pick_z + (nested - 1) * DEFAULT_NEST_INC
+        place_z = UNSTACK_DROP_Z_BASE + (nested - 1) * DEFAULT_NEST_INC
         if not (self._move_limits.z_min <= place_z <= self._move_limits.z_max):
             raise ValueError(
                 f"destination place_z={place_z:.3f} (nested={nested}) outside "
