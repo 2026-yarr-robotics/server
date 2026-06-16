@@ -90,7 +90,49 @@ echo "[REAL] DSR M0609 Bringup 시작 (mode=real, host=${ROBOT_IP})"
     ros2 launch cup_stack skill_api.launch.py
 ) &
 SKILL_API_LAUNCH_PID=$!
-trap 'kill ${SKILL_API_LAUNCH_PID:-} 2>/dev/null || true' EXIT INT TERM
+
+# ── Real-time: KEEP ros2_control_node's servo loop on SCHED_FIFO ─────────────
+# dsr_bringup2 starts ros2_control_node on SCHED_OTHER. Under CPU contention
+# (YOLO/exo perception) the servo/read loop gets preempted -> control-loop
+# dt-skips -> Doosan velocity-spike safety stop AND joint_state/TF stalls up to
+# 2.5s (hand-eye base coords jump). The RT-promotion in ros2-cup-stack
+# cup_stack/bringup_real.sh is NEVER run on this host (we launch dsr_bringup2
+# directly), so do it here — and keep a watch: the controller can RESPAWN, and a
+# one-shot promote leaves the new process on SCHED_OTHER (tf_stamp_miss climbs
+# again mid-run). So re-promote whenever it is not fully FIFO. -a = ALL threads
+# (the loop is a WORKER thread; `chrt -p` alone leaves it on SCHED_OTHER). No
+# sudo if this shell has an RLIMIT_RTPRIO grant (run ros2-cup-stack/ros2/src/
+# cup_stack/setup_rt.sh once + re-login); else passwordless sudo; else warns.
+RT_PRIORITY=${RT_PRIORITY:-80}
+rt_all_fifo() {   # true iff every thread of $1 is SCHED_FIFO
+    local t
+    for t in /proc/"$1"/task/*/; do
+        chrt -p "$(basename "$t")" 2>/dev/null | grep -q SCHED_FIFO || return 1
+    done
+    return 0
+}
+(
+    warned=0
+    while true; do
+        pid=$(pgrep -f "ros2_control_node.*__ns:=/dsr01" 2>/dev/null | head -n1)
+        if [ -n "$pid" ] && ! rt_all_fifo "$pid"; then
+            chrt -a -f -p "$RT_PRIORITY" "$pid" 2>/dev/null \
+                || sudo -n chrt -a -f -p "$RT_PRIORITY" "$pid" 2>/dev/null || true
+            if rt_all_fifo "$pid"; then
+                echo "[RT] ros2_control_node pid=$pid -> SCHED_FIFO:${RT_PRIORITY} (all threads)"
+                warned=0
+            elif [ "$warned" = 0 ]; then
+                echo "[RT][WARN] ros2_control_node NOT fully SCHED_FIFO — servo loop will"
+                echo "[RT][WARN]   jitter (velocity-spike safety stop / TF stall). Fix once:"
+                echo "[RT][WARN]   ros2-cup-stack/ros2/src/cup_stack/setup_rt.sh  then re-login."
+                warned=1
+            fi
+        fi
+        sleep 2
+    done
+) &
+RT_PROMOTE_PID=$!
+trap 'kill ${SKILL_API_LAUNCH_PID:-} ${RT_PROMOTE_PID:-} 2>/dev/null || true' EXIT INT TERM
 
 ros2 launch dsr_bringup2 dsr_bringup2_rviz.launch.py \
     model:=m0609 \
