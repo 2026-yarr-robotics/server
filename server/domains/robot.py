@@ -1442,6 +1442,10 @@ class RobotDomain:
             # Skip the per-cup return to HOME except where the caller wants it
             # (the last cup of a sequence): far faster, no per-cup round-trip.
             "home": home,
+            # Cross at the max safe altitude: every pyramid slot has same-tier
+            # neighbours standing beside it, so the held cup must clear the
+            # whole source stack laterally, not just the low destination nest.
+            "full_clear": True,
         }
         logger.info(
             "unstack_skill (nested=%d, home=%s) -> %s", nested, home, payload
